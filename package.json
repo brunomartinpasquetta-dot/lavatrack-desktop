@@ -1,0 +1,13 @@
+{
+  "name": "lavatrack",
+  "version": "1.0.0",
+  "description": "LavaTrack — Demo de gestión de ropa hospitalaria (clínica ↔ lavandería tercerizada)",
+  "private": true,
+  "scripts": {
+    "demo": "bash start.sh",
+    "start": "node server/src/index.js",
+    "seed": "node server/src/db/seed.js",
+    "build": "npm --prefix client run build",
+    "install:all": "npm --prefix server install && npm --prefix client install"
+  }
+}

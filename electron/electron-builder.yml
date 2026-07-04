@@ -1,0 +1,76 @@
+# Configuración de empaquetado de LavaTrack Desktop (electron-builder).
+# Modo web original intacto: esto sólo produce los instaladores de escritorio.
+appId: com.bpsgsistemas.lavatrack
+productName: LavaTrack
+copyright: © BPSG Sistemas
+
+directories:
+  output: dist-desktop
+  buildResources: build
+
+# Código que va DENTRO del asar de la app (el shell Electron).
+files:
+  - main.js
+  - preload.cjs
+  - package.json
+  - "!probe.js"
+  - "!electron-builder.yml"
+  - "!dist-desktop/**"
+
+# Recursos FUERA del asar (para que node:sqlite y la resolución de node_modules del
+# servidor funcionen sin empaquetar dependencias nativas dentro del asar).
+# main.js los resuelve vía process.resourcesPath cuando app.isPackaged es true.
+extraResources:
+  - from: ../server/src
+    to: server/src
+  - from: ../server/node_modules
+    to: server/node_modules
+  - from: ../server/package.json
+    to: server/package.json
+  - from: ../client/dist
+    to: client/dist
+
+# Feed de updates: GitHub Releases, mismo patrón que StockFlow (repo público → el
+# cliente baja latest.yml/instalador por URL directa SIN token). electron-updater
+# resuelve el feed a https://github.com/<owner>/<repo>/releases/download/vX.Y.Z/latest*.yml.
+#
+# FALTANTE: el repo brunomartinpasquetta-dot/lavatrack-desktop TODAVÍA NO EXISTE.
+# Crear con:  gh repo create brunomartinpasquetta-dot/lavatrack-desktop --public
+# owner/repo se pueden sobreescribir al publicar con -c.publish.owner=... -c.publish.repo=...
+# (el script scripts/publicar-release.sh usa LAVATRACK_GH_OWNER / LAVATRACK_GH_REPO).
+publish:
+  - provider: github
+    owner: brunomartinpasquetta-dot
+    repo: lavatrack-desktop
+    private: false
+    releaseType: release
+
+# --- Windows (PRIORIDAD): instalador NSIS ---
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+  artifactName: "${productName}-${version}-setup.${ext}"
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LavaTrack
+
+# --- macOS: dmg ---
+mac:
+  icon: build/icon.icns
+  target:
+    - dmg
+  category: public.app-category.medical
+  artifactName: "${productName}-${version}.${ext}"
+
+# --- Linux: AppImage ---
+linux:
+  icon: build/icon.png
+  target:
+    - AppImage
+  category: Office
+  artifactName: "${productName}-${version}.${ext}"

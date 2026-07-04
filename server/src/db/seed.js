@@ -1,0 +1,258 @@
+// Seed de datos de ejemplo de LavaTrack.
+// Genera 60 días de historia realista para que la demo no arranque vacía.
+// Es idempotente a nivel "arranque": index.js solo lo corre si la base está vacía.
+import { getDb, baseVacia } from './connection.js';
+import { sectoresRepo, tiposRepo, stockRepo, bajasRepo, dotacionRepo } from './repositorios.js';
+import { crearRemito } from '../services/remitosService.js';
+import { enTransaccion } from './tx.js';
+
+// PRNG determinístico (LCG) para que la demo genere siempre los mismos datos.
+let _semilla = 20260703;
+function rnd() {
+  _semilla = (_semilla * 1664525 + 1013904223) % 4294967296;
+  return _semilla / 4294967296;
+}
+const enteroEntre = (min, max) => min + Math.floor(rnd() * (max - min + 1));
+const elegir = (arr) => arr[Math.floor(rnd() * arr.length)];
+
+// Fecha (YYYY-MM-DD) hace N días respecto de hoy.
+function diasAtras(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+const FIRMANTES = [
+  'María Gómez', 'Juan Pérez', 'Ana Ruiz', 'Carlos Fernández', 'Lucía Martínez',
+  'Diego López', 'Sofía Romero', 'Valentina Sosa', 'Gabriel Torres', 'Florencia Aguirre',
+];
+const AUTORIZANTES = [
+  'Lic. Roberto Díaz', 'Dra. Carla Benítez', 'Enf. Jefe Mónica Vega', 'Lic. Andrés Molina',
+];
+
+// --- Catálogos base ---
+
+// Tipos de prenda con pesos logísticos y costos de reposición estimados (ARS, mediados 2026).
+const TIPOS = [
+  { nombre: 'Sábana',           peso_promedio_gr: 600,  vida_util_ciclos: 150, costo_reposicion_ars: 12000 },
+  { nombre: 'Funda de almohada', peso_promedio_gr: 180, vida_util_ciclos: 150, costo_reposicion_ars: 4500 },
+  { nombre: 'Frazada',          peso_promedio_gr: 1400, vida_util_ciclos: 200, costo_reposicion_ars: 28000 },
+  { nombre: 'Toalla',           peso_promedio_gr: 400,  vida_util_ciclos: 120, costo_reposicion_ars: 8500 },
+  { nombre: 'Ambo',             peso_promedio_gr: 500,  vida_util_ciclos: 100, costo_reposicion_ars: 22000 },
+  { nombre: 'Camisolín',        peso_promedio_gr: 250,  vida_util_ciclos: 80,  costo_reposicion_ars: 6000 },
+  { nombre: 'Campo quirúrgico', peso_promedio_gr: 700,  vida_util_ciclos: 90,  costo_reposicion_ars: 18000 },
+];
+
+// Sectores con su stock mínimo por tipo de prenda (clave = id de tipo, 1..7) y método de reposición.
+// Se mezclan métodos para mostrar los tres flujos en la demo de "Reposición del día".
+const SECTORES = [
+  { nombre: 'Internación A',   metodo_reposicion: 'PAR',              stock_minimo: { 1: 80, 2: 80, 3: 30, 4: 60 }, tipos: [1, 2, 3, 4] },
+  { nombre: 'Internación B',   metodo_reposicion: 'PAR',              stock_minimo: { 1: 70, 2: 70, 3: 25, 4: 50 }, tipos: [1, 2, 3, 4] },
+  { nombre: 'Quirófano',       metodo_reposicion: 'CARRO_INTERCAMBIO', stock_minimo: { 1: 30, 5: 40, 6: 60, 7: 50 }, tipos: [5, 6, 7, 1] },
+  { nombre: 'Guardia',         metodo_reposicion: 'PAR',              stock_minimo: { 1: 40, 4: 40, 5: 20, 6: 30 }, tipos: [1, 4, 5, 6] },
+  { nombre: 'Consultorios',    metodo_reposicion: 'PEDIDO',           stock_minimo: { 1: 20, 2: 20, 4: 30, 6: 40 }, tipos: [1, 2, 4, 6] },
+  { nombre: 'Ropería Central', metodo_reposicion: 'PAR',              stock_minimo: { 1: 200, 2: 200, 3: 80, 4: 150, 5: 100, 6: 120, 7: 100 }, tipos: [1, 2, 3, 4] },
+];
+
+// Stock inicial "bajo" forzado para que el dashboard muestre alertas (sector nombre, tipo id → cantidad final deseada).
+const STOCK_BAJO_FORZADO = [
+  { sector: 'Guardia',      tipo: 4, cantidad: 12 },  // Toalla → crítico (mín 40)
+  { sector: 'Internación A', tipo: 1, cantidad: 58 }, // Sábana → bajo (mín 80)
+  { sector: 'Consultorios', tipo: 6, cantidad: 15 },  // Camisolín → crítico (mín 40)
+  { sector: 'Quirófano',    tipo: 7, cantidad: 22 },  // Campo quirúrgico → crítico (mín 50)
+  { sector: 'Internación B', tipo: 4, cantidad: 44 }, // Toalla → bajo (mín 50)
+];
+
+export function correrSeed() {
+  const db = getDb();
+  if (!baseVacia()) {
+    console.log('[seed] La base ya tiene datos; no se vuelve a sembrar.');
+    return;
+  }
+
+  // Toda la carga va en una sola transacción (enTransaccion es re-entrante, así que los
+  // crearRemito internos se unen a esta misma sin abrir transacciones anidadas).
+  enTransaccion(() => {
+    // 1) Tipos de prenda
+    const tipos = TIPOS.map((t) => tiposRepo.crear(t));
+
+    // 2) Sectores (con método de reposición)
+    const sectores = SECTORES.map((s) =>
+      sectoresRepo.crear({
+        nombre: s.nombre,
+        stock_minimo: s.stock_minimo,
+        metodo_reposicion: s.metodo_reposicion,
+      })
+    );
+    const sectorPorNombre = new Map(sectores.map((s) => [s.nombre, s]));
+    const metaSector = new Map(SECTORES.map((s, i) => [sectores[i].id, s]));
+
+    // 2b) Dotación par por sector × tipo: mínima = stock_minimo, par = mínima × 2.
+    for (let i = 0; i < sectores.length; i++) {
+      const sector = sectores[i];
+      const minimos = SECTORES[i].stock_minimo;
+      for (const [tipoIdStr, minima] of Object.entries(minimos)) {
+        dotacionRepo.guardar(sector.id, Number(tipoIdStr), Number(minima) * 2, Number(minima));
+      }
+    }
+
+    const fechaBase = diasAtras(60);
+    const cellsForzadas = new Set(STOCK_BAJO_FORZADO.map((c) => `${sectorPorNombre.get(c.sector).id}:${c.tipo}`));
+
+    // 3) Stock inicial (ALTA_REPOSICION) por sector × tipo, 60 días atrás.
+    for (const sector of sectores) {
+      const meta = metaSector.get(sector.id);
+      for (const tipoId of Object.keys(sector.stock_minimo).map(Number)) {
+        const forzado = STOCK_BAJO_FORZADO.find(
+          (c) => sectorPorNombre.get(c.sector).id === sector.id && c.tipo === tipoId
+        );
+        const minimo = sector.stock_minimo[tipoId];
+        // Cargas forzadas quedan bajo el mínimo; el resto arranca con buen colchón
+        // para que los envíos en lavandería y los faltantes nunca dejen el stock en negativo.
+        const inicial = forzado ? forzado.cantidad : minimo + enteroEntre(55, 110);
+        stockRepo.crearMovimiento({
+          fecha: fechaBase,
+          sector_id: sector.id,
+          tipo_prenda_id: tipoId,
+          delta: inicial,
+          motivo: 'ALTA_REPOSICION',
+          remito_id: null,
+        });
+      }
+    }
+
+    // 4) Generar ~25 envíos a lo largo de 60 días.
+    const CANT_ENVIOS = 25;
+    // Sectores que efectivamente despachan ropa sucia (Ropería Central casi no envía).
+    const emisores = sectores.filter((s) => s.nombre !== 'Ropería Central');
+
+    // Índices con tratamiento especial.
+    const idxPendientes = new Set([23, 24]);          // 2 últimos: quedan sin retorno (en lavandería).
+    const idxDiferencia = new Set([6, 12, 18]);       // 3 con faltantes → CON_DIFERENCIA.
+    const idxCategorizado = new Set([3, 9, 15]);      // 3 retornos con desglose por calidad (relavado/costura/descarte).
+
+    for (let i = 0; i < CANT_ENVIOS; i++) {
+      const sector = elegir(emisores);
+      const meta = metaSector.get(sector.id);
+      // Fechas: envíos más viejos primero, los últimos bien recientes.
+      // Pendientes: antigüedad 3-7 días para poder demostrar "Registrar retorno" en vivo.
+      const diaEnvio = idxPendientes.has(i) ? enteroEntre(3, 7) : 58 - Math.floor((i / CANT_ENVIOS) * 54) - enteroEntre(0, 2);
+      const fechaEnvio = diasAtras(Math.max(diaEnvio, 1));
+
+      // Evitar tocar las celdas de stock bajo forzado en pendientes/diferencias.
+      const tiposDisponibles = (idxPendientes.has(i) || idxDiferencia.has(i))
+        ? meta.tipos.filter((t) => !cellsForzadas.has(`${sector.id}:${t}`))
+        : meta.tipos;
+      const tiposElegibles = tiposDisponibles.length ? tiposDisponibles : meta.tipos;
+
+      const cantLineas = Math.min(enteroEntre(2, 3), tiposElegibles.length);
+      const barajados = [...tiposElegibles].sort(() => rnd() - 0.5);
+      const items = barajados.slice(0, cantLineas).map((tipoId) => {
+        const cantidad = enteroEntre(10, 28);
+        const contaminada = rnd() < 0.4 ? enteroEntre(1, Math.max(1, Math.floor(cantidad * 0.3))) : 0;
+        return { tipo_prenda_id: tipoId, cantidad, cantidad_contaminada: contaminada };
+      });
+
+      const envio = crearRemito({
+        tipo: 'ENVIO',
+        sector_id: sector.id,
+        fecha: fechaEnvio,
+        firmante: elegir(FIRMANTES),
+        observaciones: '',
+        items,
+      });
+
+      // Pendientes: no se registra retorno (quedan ENVIADO / en lavandería).
+      if (idxPendientes.has(i)) continue;
+
+      // Retorno 2-4 días después del envío (nunca en el futuro).
+      const diaRetorno = Math.max(Math.max(diaEnvio, 1) - enteroEntre(2, 4), 0);
+      const fechaRetorno = diasAtras(diaRetorno);
+
+      let itemsRetorno;
+      if (idxDiferencia.has(i)) {
+        // Faltan algunas prendas de una línea → diferencia.
+        itemsRetorno = items.map((it, idx) => {
+          if (idx === 0) {
+            const faltante = enteroEntre(2, Math.max(2, Math.floor(it.cantidad * 0.25)));
+            return { tipo_prenda_id: it.tipo_prenda_id, cantidad: it.cantidad - faltante, cantidad_contaminada: 0 };
+          }
+          return { tipo_prenda_id: it.tipo_prenda_id, cantidad: it.cantidad, cantidad_contaminada: 0 };
+        });
+      } else if (idxCategorizado.has(i)) {
+        // Retorno completo pero con desglose por calidad en la primera línea:
+        // parte apta + relavado + costura + descarte (todo justificado → CONCILIADO, con baja por descarte).
+        itemsRetorno = items.map((it, idx) => {
+          if (idx === 0 && it.cantidad >= 8) {
+            const descarte = enteroEntre(1, 3);
+            const relavado = enteroEntre(1, 4);
+            const costura = enteroEntre(0, 2);
+            return {
+              tipo_prenda_id: it.tipo_prenda_id,
+              cantidad: it.cantidad,
+              cantidad_contaminada: 0,
+              cantidad_relavado: relavado,
+              cantidad_costura: costura,
+              cantidad_descarte: descarte,
+            };
+          }
+          return { tipo_prenda_id: it.tipo_prenda_id, cantidad: it.cantidad, cantidad_contaminada: 0 };
+        });
+      } else {
+        // Retorno completo → CONCILIADO.
+        itemsRetorno = items.map((it) => ({
+          tipo_prenda_id: it.tipo_prenda_id, cantidad: it.cantidad, cantidad_contaminada: 0,
+        }));
+      }
+
+      crearRemito({
+        tipo: 'RETORNO',
+        remito_envio_id: envio.id,
+        fecha: fechaRetorno,
+        firmante: elegir(FIRMANTES),
+        observaciones: '',
+        items: itemsRetorno,
+        confirmar: true,
+      });
+    }
+
+    // 5) Bajas variadas (rotura y fin de vida útil) a lo largo del período.
+    const bajas = [
+      { dia: 50, tipo: 1, cantidad: 6, motivo: 'FIN_VIDA_UTIL' },
+      { dia: 42, tipo: 4, cantidad: 4, motivo: 'ROTURA' },
+      { dia: 35, tipo: 3, cantidad: 3, motivo: 'FIN_VIDA_UTIL' },
+      { dia: 28, tipo: 6, cantidad: 5, motivo: 'ROTURA' },
+      { dia: 20, tipo: 5, cantidad: 2, motivo: 'ROTURA' },
+      { dia: 14, tipo: 1, cantidad: 8, motivo: 'FIN_VIDA_UTIL' },
+      { dia: 9,  tipo: 7, cantidad: 3, motivo: 'ROTURA' },
+      { dia: 4,  tipo: 2, cantidad: 5, motivo: 'FIN_VIDA_UTIL' },
+    ];
+    for (const b of bajas) {
+      bajasRepo.crear({
+        fecha: diasAtras(b.dia),
+        tipo_prenda_id: b.tipo,
+        cantidad: b.cantidad,
+        motivo: b.motivo,
+        autorizado_por: elegir(AUTORIZANTES),
+      });
+      // La baja también descuenta del stock de Ropería Central (depósito general).
+      stockRepo.crearMovimiento({
+        fecha: diasAtras(b.dia),
+        sector_id: sectorPorNombre.get('Ropería Central').id,
+        tipo_prenda_id: b.tipo,
+        delta: -b.cantidad,
+        motivo: b.motivo === 'ROTURA' ? 'BAJA_ROTURA' : (b.motivo === 'PERDIDA' ? 'BAJA_PERDIDA' : 'BAJA_ROTURA'),
+        remito_id: null,
+      });
+    }
+  });
+
+  const resumen = getDb().prepare('SELECT tipo, estado, COUNT(*) AS n FROM remitos GROUP BY tipo, estado').all();
+  console.log('[seed] Datos de ejemplo cargados. Remitos por tipo/estado:');
+  for (const r of resumen) console.log(`   ${r.tipo} ${r.estado}: ${r.n}`);
+}
+
+// Permite correr el seed manualmente: `npm run seed`.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  correrSeed();
+}

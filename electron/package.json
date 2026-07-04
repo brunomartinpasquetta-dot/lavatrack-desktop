@@ -1,0 +1,29 @@
+{
+  "name": "lavatrack-desktop",
+  "productName": "LavaTrack",
+  "version": "1.0.0",
+  "description": "LavaTrack Desktop — shell Electron que empaqueta el servidor y el cliente para uso offline en la clínica.",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "author": "BPSG Sistemas",
+  "scripts": {
+    "probe": "electron probe.js",
+    "dev": "electron .",
+    "build:desktop": "npm --prefix ../client run build && electron-builder",
+    "build:mac": "npm --prefix ../client run build && electron-builder --mac",
+    "build:win": "npm --prefix ../client run build && electron-builder --win",
+    "build:linux": "npm --prefix ../client run build && electron-builder --linux",
+    "pack:mac": "electron-builder --mac --dir",
+    "publish:mac": "npm --prefix ../client run build && electron-builder --mac --publish always",
+    "publish:win": "npm --prefix ../client run build && electron-builder --win --publish always",
+    "publish:linux": "npm --prefix ../client run build && electron-builder --linux --publish always"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  }
+}

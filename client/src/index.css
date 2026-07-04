@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Estilos base LavaTrack */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    @apply bg-slate-50 text-slate-800 antialiased;
+  }
+}

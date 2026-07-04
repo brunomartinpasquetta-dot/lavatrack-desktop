@@ -1,0 +1,54 @@
+# Publicación de releases de LavaTrack Desktop.
+# Mismo patrón que StockFlow (brunomartinpasquetta-dot/stockflow-desktop): se dispara
+# con el push de un tag vX.Y.Z, buildea en runners de GitHub (macOS + Windows) y publica
+# los artefactos + latest*.yml a GitHub Releases (feed de electron-updater).
+#
+# Diferencias con StockFlow: LavaTrack usa npm (no pnpm) y NO corre electron-rebuild
+# (usa node:sqlite nativo, no hay módulos nativos que compilar).
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # crear el release y subir los artefactos con el GITHUB_TOKEN integrado
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias (server + client + electron)
+        run: |
+          npm --prefix server install
+          npm --prefix client install
+          npm --prefix electron install
+
+      - name: Publicar (macOS)
+        if: matrix.os == 'macos-latest'
+        # GH_TOKEN: usa el PAT secrets.GH_TOKEN si existe; si no, cae al GITHUB_TOKEN
+        # integrado (siempre presente). Sin token, electron-builder aborta.
+        # CSC_LINK/CSC_KEY_PASSWORD opcionales para firmar/notarizar (no seteados = sin firma).
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: npm --prefix electron run publish:mac
+
+      - name: Publicar (Windows)
+        if: matrix.os == 'windows-latest'
+        # Sin code signing: el .exe se publica sin firmar (SmartScreen pedirá
+        # "Más información → Ejecutar de todas formas"). NO pasar CSC_LINK vacío acá.
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+        run: npm --prefix electron run publish:win

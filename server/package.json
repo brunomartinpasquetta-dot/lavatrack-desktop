@@ -1,0 +1,15 @@
+{
+  "name": "lavatrack-server",
+  "version": "1.0.0",
+  "description": "LavaTrack — API de gestión de ropa hospitalaria (demo)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "seed": "node src/db/seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}

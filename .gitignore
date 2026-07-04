@@ -1,0 +1,35 @@
+# --- Dependencias ---
+node_modules/
+
+# --- Base de datos y sidecars (NUNCA subir datos ni la DB) ---
+server/data/
+*.db
+*.db-wal
+*.db-shm
+*.pre-restore
+
+# --- Salidas de build ---
+client/dist/
+dist/
+electron/dist-desktop/
+# Intermedios del ícono (los binarios finales icon.icns/ico/png SÍ se versionan)
+electron/build/master-1024.png
+electron/build/icon-source.html
+electron/build/icon.iconset/
+
+# --- Entorno / secretos ---
+.env
+.env.*
+*.pem
+*.key
+
+# --- Config local de Claude Code ---
+.claude/
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+npm-debug.log*
