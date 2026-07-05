@@ -54,6 +54,9 @@ win:
 nsis:
   oneClick: false
   perMachine: false
+  # differentialPackage:false → no genera el paquete/blockmap diferencial (que sobre 100+ MB
+  # implica mucha I/O y es el principal sospechoso del cuelgue de makensis en el runner).
+  differentialPackage: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true

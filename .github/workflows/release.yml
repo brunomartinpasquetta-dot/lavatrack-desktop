@@ -29,12 +29,17 @@ jobs:
           node-version: 20
 
       # Windows Defender escanea en tiempo real cada archivo que escribe makensis al
-      # comprimir la app (~134 MB); eso hace que el build de NSIS se arrastre y parezca
-      # colgado. Desactivar el monitoreo en tiempo real acelera el empaquetado.
-      - name: Acelerar I/O de Windows (desactivar Defender en tiempo real)
+      # comprimir la app (~134 MB) → el build de NSIS se arrastra y parece colgado.
+      # En vez de desactivar Defender entero, excluimos SOLO los directorios de trabajo:
+      # el workspace y las caches de electron-builder (donde makensis escribe y comprime).
+      - name: Acelerar I/O de Windows (exclusiones de antivirus en dirs de trabajo)
         if: matrix.os == 'windows-latest'
         shell: powershell
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron-builder\Cache"
+          Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\electron\Cache"
+          Add-MpPreference -ExclusionPath "$env:TEMP"
         continue-on-error: true
 
       - name: Instalar dependencias (server + client + electron)
@@ -66,8 +71,28 @@ jobs:
         # ELECTRON_BUILDER_BINARIES_MIRROR: electron-builder baja winCodeSign + nsis desde
         # github.com/electron-userland/electron-builder-binaries; esa descarga se cuelga de
         # forma intermitente en el runner de Windows. Se redirige a un mirror más estable.
-        timeout-minutes: 40
+        #
+        # --config.compression=store: SOLO en Windows (no toca el build de mac, que usa
+        # publish:mac con compresión normal). makensis con LZMA sobre ~134 MB es donde muere;
+        # con 'store' el instalador es más pesado pero compila en minutos. Diagnóstico: si
+        # ni así compila en 20 min, el approach de NSIS-en-CI está mal y no se insiste (fallback zip).
+        # timeout 20min: si makensis no termina en 20, se corta rápido en vez de arrastrarse.
+        timeout-minutes: 20
+        # shell bash (disponible en el runner de Windows) para el script multilínea.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
           ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
-        run: npm --prefix electron run publish:win
+        run: |
+          npm --prefix client run build
+          cd electron
+          # Genera el .exe + latest.yml. --publish always intenta subir, pero si el release
+          # v1.0.0 ya está publicado hace más de 2h electron-builder SALTEA la subida (regla
+          # de seguridad). Igual deja los artefactos + latest.yml en dist-desktop.
+          npx electron-builder --win --publish always --config.compression=store
+          # Subida robusta al release existente con gh (no tiene la regla de 2h). --clobber
+          # sobrescribe si ya existe. Así no se crea un release duplicado ni se toca el de mac.
+          gh release upload v1.0.0 \
+            dist-desktop/LavaTrack-1.0.0-setup.exe \
+            dist-desktop/latest.yml \
+            --clobber --repo "$GITHUB_REPOSITORY"
