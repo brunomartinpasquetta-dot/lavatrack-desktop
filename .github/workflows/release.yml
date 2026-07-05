@@ -28,6 +28,15 @@ jobs:
         with:
           node-version: 20
 
+      # Windows Defender escanea en tiempo real cada archivo que escribe makensis al
+      # comprimir la app (~134 MB); eso hace que el build de NSIS se arrastre y parezca
+      # colgado. Desactivar el monitoreo en tiempo real acelera el empaquetado.
+      - name: Acelerar I/O de Windows (desactivar Defender en tiempo real)
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+        continue-on-error: true
+
       - name: Instalar dependencias (server + client + electron)
         run: |
           npm --prefix server install
@@ -57,7 +66,7 @@ jobs:
         # ELECTRON_BUILDER_BINARIES_MIRROR: electron-builder baja winCodeSign + nsis desde
         # github.com/electron-userland/electron-builder-binaries; esa descarga se cuelga de
         # forma intermitente en el runner de Windows. Se redirige a un mirror más estable.
-        timeout-minutes: 25
+        timeout-minutes: 40
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
           ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
