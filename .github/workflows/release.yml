@@ -86,13 +86,14 @@ jobs:
         run: |
           npm --prefix client run build
           cd electron
-          # Genera el .exe + latest.yml. --publish always intenta subir, pero si el release
-          # v1.0.0 ya está publicado hace más de 2h electron-builder SALTEA la subida (regla
-          # de seguridad). Igual deja los artefactos + latest.yml en dist-desktop.
-          npx electron-builder --win --publish always --config.compression=store
-          # Subida robusta al release existente con gh (no tiene la regla de 2h). --clobber
-          # sobrescribe si ya existe. Así no se crea un release duplicado ni se toca el de mac.
-          gh release upload v1.0.0 \
-            dist-desktop/LavaTrack-1.0.0-setup.exe \
-            dist-desktop/latest.yml \
-            --clobber --repo "$GITHUB_REPOSITORY"
+          # FALLBACK ZIP: el target NSIS se cuelga en makensis en el runner aún con las 3
+          # mitigaciones (differentialPackage off + compression store + exclusiones AV). El
+          # target 'zip' NO usa makensis (sólo empaqueta), así que no se cuelga. Entrega un
+          # .zip descargable de Windows para no bloquear; el NSIS queda pendiente de dx local.
+          npx electron-builder --win zip --publish never --config.compression=store
+          ls -la dist-desktop
+          # Subida al release existente con gh (sin la regla de 2h de electron-builder).
+          gh release upload v1.0.0 dist-desktop/*.zip --clobber --repo "$GITHUB_REPOSITORY"
+          if [ -f dist-desktop/latest.yml ]; then
+            gh release upload v1.0.0 dist-desktop/latest.yml --clobber --repo "$GITHUB_REPOSITORY"
+          fi
