@@ -125,20 +125,14 @@ https://github.com/brunomartinpasquetta-dot/lavatrack-desktop/releases/download/
 
 El updater en `electron/main.js` toma este feed del bloque `publish` (github) que queda *baked* en `app-update.yml` al buildear. Owner y repo son **overridables por variables de entorno** (`LAVATRACK_GH_OWNER`, `LAVATRACK_GH_REPO`).
 
-> **FALTANTE — hacer una sola vez antes de la primera publicación:** el repo `lavatrack-desktop` **todavía no existe**. Hay que crearlo público:
->
-> ```
-> gh repo create brunomartinpasquetta-dot/lavatrack-desktop --public
-> ```
->
-> Sin ese repo, ni la publicación manual ni la de CI tienen dónde subir los artefactos.
+> **Estado:** el repo `brunomartinpasquetta-dot/lavatrack-desktop` **ya está creado** (público) y la **v1.0.0 ya está publicada** (2026-07-05) con el `.dmg`, el `.exe` y ambos feeds. Si algún día hay que recrearlo: `gh repo create brunomartinpasquetta-dot/lavatrack-desktop --public` (o por API si no hay `gh`).
 
 ### 2. Requisitos
 
-- **`GH_TOKEN`**: un Personal Access Token (PAT) con scope **`repo`**, exportado en el entorno desde donde se publica. Es lo que permite a electron-builder crear el release y subir artefactos.
-- **`gh` CLI** o `git` configurado con acceso al repo (para crear el repo, pushear tags y editar el draft).
+- **`GH_TOKEN`**: un Personal Access Token (PAT) con scope **`repo`**, exportado en el entorno desde donde se publica.
+- **`git`** configurado con acceso al repo (para pushear tags). **`gh` CLI es opcional**: en la Mac de Bruno **no está instalado**, así que la subida de assets se hace por la **API de GitHub con `curl`** (lo hace el script). Si tenés `gh`, también sirve `gh release upload`.
 - **Node 20+** (LavaTrack usa `node:sqlite` nativo, que necesita Node moderno).
-- El **build de Windows sale del runner `windows-latest` de GitHub Actions**, no de una Mac local. No hace falta wine ni una VM: el flujo local publica macOS y CI se encarga de Windows (y también de macOS si se dispara por tag).
+- **⚠️ El build de Windows NO sale confiable del CI.** En este proyecto el job `windows-latest` **se cuelga en `makensis`** (probado 6 veces, con `differentialPackage:false` + `compression:store` + exclusiones de antivirus; hasta el fallback `zip` se colgó en la subida). **El Windows se buildea LOCAL en la Mac con wine**, que electron-builder **descarga solo** (no hace falta instalar wine por brew). Ver la sección "Windows local con wine" más abajo.
 
 ### 3. Publicar una versión (manual, desde una Mac)
 
@@ -178,16 +172,54 @@ Pasos:
    (electron-builder con `--publish always` sube el artefacto a un release **draft** en GitHub.)
 6. **Editar y publicar el draft en GitHub.** electron-builder deja el release como **draft**. Entrá al release en GitHub, agregá las notas de la versión y hacé **"Publish release"**. **Hasta que no lo publiques, los clientes NO reciben el update.**
 
-### 4. Publicar vía CI (GitHub Actions)
+### 4. Flujo de release DEFINITIVO (el que funciona)
 
-Si preferís que buildee y publique la infraestructura, alcanza con **pushear el tag**. El workflow `.github/workflows/release.yml` se dispara con `push` de tags `v*` y corre en matrix **`macos-latest` + `windows-latest`**, buildeando y publicando con `publish:mac` / `publish:win`.
+Por el cuelgue de `makensis` en el CI de Windows, el release se arma en **dos mitades**:
+
+**(a) macOS + el release + los feeds → por CI (push del tag).** El workflow `.github/workflows/release.yml` se dispara con `push` de tags `v*`, corre en matrix `macos-latest` + `windows-latest` y **publica el `.dmg` + `latest-mac.yml`** (mac funciona perfecto). El job de Windows queda como **fallback `zip` no confiable** (ver nota abajo).
 
 ```
+# bump versión en electron/package.json → commit → tag → push
 git tag v1.2.4
-git push origin v1.2.4
+git push origin main --tags     # dispara el CI: publica macOS
 ```
 
-El workflow usa el secret `GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}`. Asegurate de tener configurado `GH_TOKEN` (o dejar que use el `GITHUB_TOKEN` que provee Actions) en los secrets del repo. Igual que en el flujo manual, el release queda en **draft** hasta que lo publiques a mano.
+**(b) Windows `.exe` → build LOCAL en la Mac con wine + subida al mismo release.** Una vez que el release existe (lo crea el CI de macOS), buildeás Windows local y subís los assets al release ya existente. Todo esto lo automatiza el script:
+
+```
+export GH_TOKEN=ghp_tu_pat_con_scope_repo
+scripts/release-windows-local.sh 1.2.4        # buildea con wine y sube .exe + latest.yml + blockmap
+scripts/release-windows-local.sh 1.2.4 --dry-run   # sólo buildea y verifica, sin subir
+```
+
+#### Windows local con wine — qué hace por dentro
+
+Estos son los comandos exactos que corre el script (y que se usaron para la v1.0.0):
+
+```
+# 1) buildear el cliente y el instalador Windows x64 con wine
+npm --prefix client run build
+cd electron
+npx electron-builder --win --x64 --publish never --config.compression=store
+#   → electron-builder descarga wine-4.0.1-mac.7z SOLO (no hace falta brew).
+#   → genera dist-desktop/LavaTrack-1.2.4-setup.exe + latest.yml + .blockmap
+#   → makensis local (bajo wine, en la Mac) compila en minutos, NO se cuelga.
+
+# 2) subir los 3 assets al release existente (electron-builder NO los sube: si el
+#    release tiene +2h aplica su "regla de 2 horas"; por eso se sube aparte).
+#    Como en la Mac no hay gh, se usa la API de GitHub con curl (lo hace el script).
+#    Si tenés gh:  gh release upload v1.2.4 dist-desktop/LavaTrack-1.2.4-setup.exe dist-desktop/latest.yml dist-desktop/*.blockmap --clobber
+```
+
+> **Nota `--config.compression=store`:** deja el instalador más pesado pero compila rápido y sin riesgo. Para un instalador más chico se puede probar sin ese flag (compresión normal); si tarda mucho o se cuelga, volvé a `store`.
+
+> **Nota sandbox:** si corrés en un entorno donde `ELECTRON_RUN_AS_NODE=1` está seteado globalmente, antepené `env -u ELECTRON_RUN_AS_NODE` a electron-builder. En una Mac normal no hace falta.
+
+#### Troubleshooting Windows local
+
+- **wine no descarga / falla:** electron-builder baja `wine-4.0.1-mac.7z` a su cache (`~/Library/Caches/electron-builder`). Si la descarga falla, reintentá; como último recurso `brew install --cask wine-stable` y volvé a correr el build.
+- **makensis se cuelga también en local:** no debería (en la Mac arm64 compila en minutos). Si pasa, agregá `--config.compression=store` (ya está en el script) o revisá que no haya un antivirus escaneando `dist-desktop`.
+- **El CI de Windows:** su job quedó con `--win zip` como **fallback no confiable** (también se colgó en la subida del zip la última vez). **No dependas de él**: para Windows, usá siempre el build local con wine. El diagnóstico del cuelgue de `makensis` en el runner queda pendiente.
 
 ### 5. Qué recibe el cliente
 
@@ -200,6 +232,7 @@ El workflow usa el secret `GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKE
 
 Todo el modelo es igual al de StockFlow (GitHub Releases como feed, repo público, tags semver, canal único estable `latest*.yml`, chequeo al iniciar + cada 4h, sin firma). Las únicas diferencias:
 
+- **Build de Windows (la diferencia importante):** en **StockFlow el job `windows-latest` del CI buildea el NSIS sin problema**. En **LavaTrack ese mismo job se cuelga en `makensis`** (6 intentos, todas las mitigaciones) → **el `.exe` de LavaTrack se buildea LOCAL en la Mac con wine** y se sube al release aparte. Es el único paso manual extra respecto de StockFlow.
 - **`npm`** en vez de `pnpm` (LavaTrack no usa pnpm).
 - **Sin `electron-rebuild`**: LavaTrack usa `node:sqlite` nativo, no hay módulos nativos que compilar.
 - **Repo propio**: `lavatrack-desktop` (StockFlow usa `stockflow-desktop`).
