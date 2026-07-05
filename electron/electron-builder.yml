@@ -8,6 +8,9 @@ directories:
   output: dist-desktop
   buildResources: build
 
+# Hook que firma ad-hoc el .app de macOS tras empaquetarlo (arregla "aplicación dañada").
+afterPack: build/afterPack.cjs
+
 # Código que va DENTRO del asar de la app (el shell Electron).
 files:
   - main.js
@@ -65,6 +68,11 @@ nsis:
 # --- macOS: dmg ---
 mac:
   icon: build/icon.icns
+  # identity:null = electron-builder NO intenta firmar (no hay cert). La firma ad-hoc
+  # consistente la hace el hook afterPack (build/afterPack.cjs) con codesign --force
+  # --deep --sign -, DESPUÉS de copiar los extraResources. Así Gatekeeper no reporta
+  # "aplicación dañada". Es ad-hoc, NO notarizado: el cliente abre con click derecho → Abrir.
+  identity: null
   target:
     - dmg
   category: public.app-category.medical
