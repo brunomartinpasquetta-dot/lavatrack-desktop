@@ -53,6 +53,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         # Sin code signing: el .exe se publica sin firmar (SmartScreen pedirá
         # "Más información → Ejecutar de todas formas"). NO pasar CSC_LINK vacío acá.
+        #
+        # ELECTRON_BUILDER_BINARIES_MIRROR: electron-builder baja winCodeSign + nsis desde
+        # github.com/electron-userland/electron-builder-binaries; esa descarga se cuelga de
+        # forma intermitente en el runner de Windows. Se redirige a un mirror más estable.
+        timeout-minutes: 25
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
         run: npm --prefix electron run publish:win
