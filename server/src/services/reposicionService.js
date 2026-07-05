@@ -3,6 +3,7 @@
 import { sectoresRepo, dotacionRepo, stockRepo, tiposRepo, distribucionesRepo } from '../db/repositorios.js';
 import { enTransaccion } from '../db/tx.js';
 import { errorValidacion } from './errores.js';
+import * as cicloService from './cicloService.js';
 
 const NOMBRE_ROPERIA = 'Ropería Central';
 
@@ -17,6 +18,11 @@ function indiceStock() {
 export function calcularReposicion() {
   const sectores = sectoresRepo.listar();
   const stock = indiceStock();
+
+  // Sectores que ya tienen una distribución con fecha de hoy: sirve para que la terminal
+  // sepa que ese sector ya fue repuesto aunque se refresque la página (AUD-019).
+  const hoy = new Date().toISOString().slice(0, 10);
+  const completadosHoy = new Set(distribucionesRepo.sectorIdsPorFecha(hoy));
 
   const filas = sectores
     // La Ropería Central es el depósito de origen: no se repone a sí misma.
@@ -46,6 +52,7 @@ export function calcularReposicion() {
         sector_id: sector.id,
         sector: sector.nombre,
         metodo_reposicion: sector.metodo_reposicion,
+        completado_hoy: completadosHoy.has(sector.id),
         lineas,
       };
     });
@@ -74,6 +81,16 @@ export function generarDistribucion(payload) {
   const roperia = sectoresRepo.listar().find((s) => s.nombre === NOMBRE_ROPERIA);
   const fecha = payload.fecha || new Date().toISOString().slice(0, 10);
 
+  // Guard anti-duplicado (AUD-019/020): si ya hay una distribución para este sector en
+  // esta fecha, no la generamos de nuevo salvo que el operario confirme explícitamente.
+  // Evita la doble entrega si se refresca la terminal o se toca dos veces.
+  if (payload.confirmar !== true && distribucionesRepo.existePorSectorFecha(sector.id, fecha)) {
+    throw errorValidacion(
+      `Ya se registró una distribución para el sector ${sector.nombre} con fecha ${fecha}. ` +
+        'Confirmá para generar otra.'
+    );
+  }
+
   return enTransaccion(() => {
     const id = distribucionesRepo.crear({
       numero: distribucionesRepo.proximoNumero(),
@@ -85,6 +102,10 @@ export function generarDistribucion(payload) {
     });
 
     for (const it of items) {
+      // Vida útil: las unidades que ingresan diluyen el promedio de ciclos del tipo.
+      // Se toma el circulante ANTES de crear los movimientos del alta.
+      const circulanteAntes = stockRepo.circulantePorTipo(it.tipo_prenda_id);
+      cicloService.registrarDilucionAlta(it.tipo_prenda_id, it.cantidad, fecha, circulanteAntes);
       // Ingreso al sector destino.
       stockRepo.crearMovimiento({
         fecha,

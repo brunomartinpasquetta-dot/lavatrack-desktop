@@ -17,6 +17,44 @@ function agregarColumnaSiFalta(db, tabla, columna, definicion) {
   return false;
 }
 
+// Reconstruye movimientos_stock para ampliar el CHECK de motivo (SQLite no permite
+// ALTER de un CHECK: hay que crear la tabla nueva, copiar, drop, rename y recrear
+// índices). Se hace con foreign_keys OFF y dentro de una transacción propia, siguiendo
+// el procedimiento seguro de rebuild de la doc de SQLite. Nada referencia a
+// movimientos_stock con FK, así que el rename es seguro.
+function reconstruirMovimientosStock(db) {
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE movimientos_stock__nueva (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL,
+        sector_id INTEGER NOT NULL REFERENCES sectores(id),
+        tipo_prenda_id INTEGER NOT NULL REFERENCES tipos_prenda(id),
+        delta INTEGER NOT NULL,
+        motivo TEXT NOT NULL CHECK (motivo IN ('ENVIO','RETORNO','BAJA_ROTURA','BAJA_PERDIDA','BAJA_FIN_VIDA_UTIL','ALTA_REPOSICION','AJUSTE')),
+        remito_id INTEGER REFERENCES remitos(id)
+      );
+    `);
+    db.exec(`
+      INSERT INTO movimientos_stock__nueva (id, fecha, sector_id, tipo_prenda_id, delta, motivo, remito_id)
+      SELECT id, fecha, sector_id, tipo_prenda_id, delta, motivo, remito_id FROM movimientos_stock;
+    `);
+    db.exec('DROP TABLE movimientos_stock;');
+    db.exec('ALTER TABLE movimientos_stock__nueva RENAME TO movimientos_stock;');
+    // Los índices se perdieron con la tabla vieja: recreamos el covering (AUD-011).
+    db.exec('CREATE INDEX IF NOT EXISTS idx_mov_cover ON movimientos_stock(sector_id, tipo_prenda_id, delta);');
+    db.exec('PRAGMA foreign_key_check;');
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* ya sin transacción */ }
+    db.exec('PRAGMA foreign_keys = ON;');
+    throw e;
+  }
+  db.exec('PRAGMA foreign_keys = ON;');
+}
+
 export function correrMigraciones(db) {
   const cambios = [];
 
@@ -63,6 +101,73 @@ export function correrMigraciones(db) {
     }
   }
   if (filasPar > 0) cambios.push(`dotacion_par (+${filasPar} filas backfill)`);
+
+  // --- M4: motivo BAJA_FIN_VIDA_UTIL en movimientos_stock (AUD-002) ---
+  // 4a) Ampliar el CHECK de motivo para admitir BAJA_FIN_VIDA_UTIL. Idempotente:
+  // solo reconstruye si el CHECK actual (en sqlite_master.sql) todavía no lo admite.
+  const movSql = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='movimientos_stock'")
+    .get();
+  if (movSql && !movSql.sql.includes('BAJA_FIN_VIDA_UTIL')) {
+    reconstruirMovimientosStock(db);
+    cambios.push('movimientos_stock (CHECK ampliado con BAJA_FIN_VIDA_UTIL)');
+  }
+
+  // 4b) Corregir movimientos históricos mal asentados: un movimiento BAJA_ROTURA con
+  // delta<0 cuya (fecha, tipo_prenda_id, |delta|) coincide con una baja FIN_VIDA_UTIL
+  // es en realidad un fin de vida útil aplastado a rotura → lo pasamos a BAJA_FIN_VIDA_UTIL.
+  // NO toca los que corresponden a bajas ROTURA reales. Idempotente: al reasentarlos,
+  // dejan de matchear como BAJA_ROTURA y en corridas siguientes changes = 0.
+  const infoUpd = db
+    .prepare(
+      `UPDATE movimientos_stock
+          SET motivo = 'BAJA_FIN_VIDA_UTIL'
+        WHERE motivo = 'BAJA_ROTURA' AND delta < 0
+          AND EXISTS (
+            SELECT 1 FROM bajas b
+             WHERE b.motivo = 'FIN_VIDA_UTIL'
+               AND b.fecha = movimientos_stock.fecha
+               AND b.tipo_prenda_id = movimientos_stock.tipo_prenda_id
+               AND b.cantidad = -movimientos_stock.delta
+          )`
+    )
+    .run();
+  if (infoUpd.changes > 0) {
+    cambios.push(`movimientos_stock (${infoUpd.changes} mov. BAJA_ROTURA→BAJA_FIN_VIDA_UTIL)`);
+  }
+
+  // --- M5: índice covering en movimientos_stock (AUD-011) ---
+  // Reemplaza idx_mov_sector_tipo (no covering) por idx_mov_cover, que incluye delta
+  // para resolver stockRepo.matriz() sin lookup a la tabla. Idempotente.
+  const indices = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='movimientos_stock'")
+    .all()
+    .map((r) => r.name);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_mov_cover ON movimientos_stock(sector_id, tipo_prenda_id, delta);');
+  if (indices.includes('idx_mov_sector_tipo')) {
+    db.exec('DROP INDEX IF EXISTS idx_mov_sector_tipo;');
+    cambios.push('idx_mov_sector_tipo → idx_mov_cover (covering)');
+  }
+
+  // --- M6: refactor de dominio (ciclos / inventario / ajustes / presets / prendas) ---
+  // Las 7 tablas nuevas las crea el esquema base (SCHEMA_SQL, IF NOT EXISTS), igual que
+  // dotacion_par en M3. Acá solo van los cambios in-place sobre tablas EXISTENTES.
+
+  // 6a) remito_items.codigos_json (barcode-ready): JSON array de códigos o NULL.
+  if (agregarColumnaSiFalta(db, 'remito_items', 'codigos_json', 'TEXT')) {
+    cambios.push('remito_items.codigos_json');
+  }
+
+  // 6b) Ampliar el CHECK de movimientos_stock.motivo para admitir 'AJUSTE'. Idempotente:
+  // solo reconstruye si el CHECK actual (en sqlite_master.sql) todavía no lo admite.
+  // Reusa reconstruirMovimientosStock() (que ya genera el CHECK con 'AJUSTE' incluido).
+  const movSqlAjuste = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='movimientos_stock'")
+    .get();
+  if (movSqlAjuste && !movSqlAjuste.sql.includes('AJUSTE')) {
+    reconstruirMovimientosStock(db);
+    cambios.push('movimientos_stock (CHECK ampliado con AJUSTE)');
+  }
 
   if (cambios.length) {
     console.log('[migrations] Aplicadas:', cambios.join(', '));

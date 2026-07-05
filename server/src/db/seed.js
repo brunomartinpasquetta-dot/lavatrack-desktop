@@ -2,7 +2,10 @@
 // Genera 60 días de historia realista para que la demo no arranque vacía.
 // Es idempotente a nivel "arranque": index.js solo lo corre si la base está vacía.
 import { getDb, baseVacia } from './connection.js';
-import { sectoresRepo, tiposRepo, stockRepo, bajasRepo, dotacionRepo } from './repositorios.js';
+import {
+  sectoresRepo, tiposRepo, stockRepo, bajasRepo, dotacionRepo,
+  ciclosRepo, inventariosRepo, ajustesRepo, presetsRepo, prendasRepo,
+} from './repositorios.js';
 import { crearRemito } from '../services/remitosService.js';
 import { enTransaccion } from './tx.js';
 
@@ -241,10 +244,122 @@ export function correrSeed() {
         sector_id: sectorPorNombre.get('Ropería Central').id,
         tipo_prenda_id: b.tipo,
         delta: -b.cantidad,
-        motivo: b.motivo === 'ROTURA' ? 'BAJA_ROTURA' : (b.motivo === 'PERDIDA' ? 'BAJA_PERDIDA' : 'BAJA_ROTURA'),
+        // El motivo del kárdex debe reflejar el motivo real de la baja (AUD-002):
+        // ROTURA→BAJA_ROTURA, PERDIDA→BAJA_PERDIDA, FIN_VIDA_UTIL→BAJA_FIN_VIDA_UTIL.
+        motivo:
+          b.motivo === 'ROTURA'
+            ? 'BAJA_ROTURA'
+            : b.motivo === 'PERDIDA'
+              ? 'BAJA_PERDIDA'
+              : 'BAJA_FIN_VIDA_UTIL',
         remito_id: null,
       });
     }
+
+    // ======================================================================
+    // 3.5) Refactor de dominio: ciclos, presets, prendas identificadas e
+    //      inventario cerrado con ajustes. Todo coherente con la historia.
+    // ======================================================================
+
+    // 6) Ciclos de vida útil por tipo (promedio acumulado, nivel lote).
+    // Valores representativos de la vida ya recorrida. Camisolín (tipo 6) queda
+    // en pct 0.85 (>=0.8) para disparar la alarma "Reposición próxima" en la demo.
+    const hoy = diasAtras(0);
+    const CICLOS_SEMBRADOS = {
+      1: 45,  // Sábana        vida 150 → 0.30
+      2: 40,  // Funda         vida 150 → 0.27
+      3: 30,  // Frazada       vida 200 → 0.15
+      4: 55,  // Toalla        vida 120 → 0.46
+      5: 62,  // Ambo          vida 100 → 0.62
+      6: 68,  // Camisolín     vida 80  → 0.85  ← alarma (proxima)
+      7: 58,  // Campo quirúr. vida 90  → 0.64
+    };
+    for (const t of tipos) {
+      ciclosRepo.upsert(t.id, CICLOS_SEMBRADOS[t.id] ?? 0, hoy);
+    }
+
+    // 7) Presets de carga: uno por sector (Internación A) y uno global (quirófano).
+    const internacionA = sectorPorNombre.get('Internación A');
+    presetsRepo.crear({
+      nombre: 'Carro Internación estándar',
+      sector_id: internacionA.id,
+      activo: 1,
+      items: [
+        { tipo_prenda_id: 1, cantidad: 20 }, // Sábana
+        { tipo_prenda_id: 2, cantidad: 20 }, // Funda de almohada
+        { tipo_prenda_id: 4, cantidad: 15 }, // Toalla
+      ],
+    });
+    presetsRepo.crear({
+      nombre: 'Kit Quirófano',
+      sector_id: null, // global
+      activo: 1,
+      items: [
+        { tipo_prenda_id: 7, cantidad: 10 }, // Campo quirúrgico
+        { tipo_prenda_id: 6, cantidad: 8 },  // Camisolín
+        { tipo_prenda_id: 5, cantidad: 6 },  // Ambo
+      ],
+    });
+
+    // 8) 5 prendas identificadas (campos quirúrgicos) en Quirófano, estado EN_SECTOR.
+    const quirofano = sectorPorNombre.get('Quirófano');
+    for (let n = 1; n <= 5; n++) {
+      prendasRepo.crear({
+        codigo: `CQ-${String(n).padStart(4, '0')}`,
+        tipo_prenda_id: 7, // Campo quirúrgico
+        sector_actual_id: quirofano.id,
+        fecha_alta: diasAtras(45),
+      });
+    }
+
+    // 9) Inventario CERRADO en Internación B con 2 diferencias → 2 ajustes
+    //    (motivo INVENTARIO) + 2 movimientos AJUSTE en el kárdex (conciliables).
+    const internacionB = sectorPorNombre.get('Internación B');
+    const fechaInv = diasAtras(2);
+    const stockCelda = getDb().prepare(
+      `SELECT COALESCE(SUM(delta),0) AS actual FROM movimientos_stock
+       WHERE sector_id = ? AND tipo_prenda_id = ?`
+    );
+    const invId = inventariosRepo.crear({
+      fecha: fechaInv,
+      sector_id: internacionB.id,
+      usuario: elegir(AUTORIZANTES),
+      observaciones: '',
+    });
+    // Snapshot de todos los tipos con dotación en el sector; 2 con diferencia, 2 exactos.
+    const DIF_SEMBRADA = { 1: -3, 4: +2 }; // Sábana faltan 3, Toalla sobran 2.
+    const tiposInv = Object.keys(internacionB.stock_minimo).map(Number);
+    for (const tipoId of tiposInv) {
+      const teorica = stockCelda.get(internacionB.id, tipoId).actual;
+      const dif = DIF_SEMBRADA[tipoId] ?? 0;
+      const contada = teorica + dif;
+      const itemId = inventariosRepo.crearItem(invId, {
+        tipo_prenda_id: tipoId,
+        cantidad_teorica: teorica,
+      });
+      inventariosRepo.setContada(invId, tipoId, contada);
+      inventariosRepo.setDiferencia(itemId, dif);
+      if (dif !== 0) {
+        ajustesRepo.crear({
+          fecha: fechaInv,
+          sector_id: internacionB.id,
+          tipo_prenda_id: tipoId,
+          delta: dif,
+          motivo: 'INVENTARIO',
+          autorizado_por: elegir(AUTORIZANTES),
+          inventario_id: invId,
+        });
+        stockRepo.crearMovimiento({
+          fecha: fechaInv,
+          sector_id: internacionB.id,
+          tipo_prenda_id: tipoId,
+          delta: dif,
+          motivo: 'AJUSTE',
+          remito_id: null,
+        });
+      }
+    }
+    inventariosRepo.cerrar(invId, { observaciones: 'Inventario cíclico de demostración.' });
   });
 
   const resumen = getDb().prepare('SELECT tipo, estado, COUNT(*) AS n FROM remitos GROUP BY tipo, estado').all();

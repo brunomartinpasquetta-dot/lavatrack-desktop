@@ -4,6 +4,8 @@
 import { remitosRepo, sectoresRepo, tiposRepo, stockRepo, bajasRepo } from '../db/repositorios.js';
 import { enTransaccion } from '../db/tx.js';
 import { errorValidacion, errorNoEncontrado } from './errores.js';
+import * as cicloService from './cicloService.js';
+import * as prendaService from './prendaService.js';
 
 // Estados que indican que un envío ya fue conciliado (no admite nuevo retorno ni reconciliación).
 const ESTADOS_CONCILIADOS = ['CONCILIADO', 'CON_DIFERENCIA'];
@@ -58,18 +60,27 @@ function calcularPesoKg(items, tiposCache) {
   return Math.round((gramos / 1000) * 10) / 10;
 }
 
+// Añade el array `codigos` (parseando codigos_json) a un item de remito para el detalle.
+function conCodigos(item) {
+  let codigos = null;
+  if (item.codigos_json) {
+    try { codigos = JSON.parse(item.codigos_json); } catch { codigos = null; }
+  }
+  return { ...item, codigos };
+}
+
 // --- Construcción del detalle completo de un remito (shape del contrato) ---
 
 export function construirDetalle(id) {
   const remito = remitosRepo.obtener(id);
   if (!remito) throw errorNoEncontrado(`No se encontró el remito ${id}.`);
 
-  const items = remitosRepo.itemsDe(id);
+  const items = remitosRepo.itemsDe(id).map(conCodigos);
   const detalle = { ...remito, items };
 
   if (remito.tipo === 'ENVIO') {
     const retorno = remitosRepo.retornoDe(id);
-    detalle.retorno = retorno ? { ...retorno, items: remitosRepo.itemsDe(retorno.id) } : null;
+    detalle.retorno = retorno ? { ...retorno, items: remitosRepo.itemsDe(retorno.id).map(conCodigos) } : null;
     detalle.conciliacion = retorno ? construirConciliacion(remito, retorno) : null;
   }
   return detalle;
@@ -145,6 +156,10 @@ function crearEnvioCore(payload) {
   if (!sector) throw errorValidacion(`No existe el sector con id ${payload.sector_id}.`);
 
   const tiposCache = validarItems(payload.items);
+  // Validar códigos de prendas identificadas por línea (si vinieran).
+  for (const it of payload.items) {
+    prendaService.validarCodigosItem(it, tiposCache.get(it.tipo_prenda_id)?.nombre);
+  }
   const fecha = payload.fecha || new Date().toISOString().slice(0, 10);
   const peso = calcularPesoKg(payload.items, tiposCache);
 
@@ -161,7 +176,7 @@ function crearEnvioCore(payload) {
   });
 
   for (const it of payload.items) {
-    remitosRepo.crearItem(id, it);
+    remitosRepo.crearItem(id, it); // persiste codigos_json si it.codigos viene
     // El envío saca prendas del sector hacia la lavandería (delta negativo).
     stockRepo.crearMovimiento({
       fecha,
@@ -171,6 +186,8 @@ function crearEnvioCore(payload) {
       motivo: 'ENVIO',
       remito_id: id,
     });
+    // Prendas identificadas de la línea → EN_LAVANDERIA.
+    prendaService.aplicarEnvio(it, payload.sector_id, fecha);
   }
   return construirDetalle(id);
 }
@@ -190,6 +207,10 @@ function crearRetornoCore(payload) {
   }
 
   const tiposCache = validarItems(payload.items, { permitirCero: true, categorizar: true });
+  // Validar códigos de prendas identificadas por línea (si vinieran).
+  for (const it of payload.items) {
+    prendaService.validarCodigosItem(it, tiposCache.get(it.tipo_prenda_id)?.nombre);
+  }
 
   // Regla: no se acepta recibir más de lo enviado por tipo, salvo confirmación explícita.
   if (!payload.confirmar) {
@@ -197,9 +218,10 @@ function crearRetornoCore(payload) {
     for (const it of payload.items) {
       const enviado = enviados.get(it.tipo_prenda_id) ?? 0;
       if (it.cantidad > enviado) {
+        const nombrePrenda = tiposCache.get(it.tipo_prenda_id)?.nombre || 'esta prenda';
         throw errorValidacion(
-          `La cantidad recibida (${it.cantidad}) supera la enviada (${enviado}) para un tipo de prenda. ` +
-            'Reenviá con "confirmar": true para forzar el registro.'
+          `La cantidad recibida (${it.cantidad}) supera la enviada (${enviado}) para ${nombrePrenda}. ` +
+            'Verificá el conteo o confirmá para registrar la diferencia.'
         );
       }
     }
@@ -255,10 +277,15 @@ function crearRetornoCore(payload) {
         sector_id: envio.sector_id,
         tipo_prenda_id: it.tipo_prenda_id,
         delta: -descarte,
-        motivo: 'BAJA_ROTURA',
+        motivo: 'BAJA_FIN_VIDA_UTIL',
         remito_id: idRetorno,
       });
     }
+
+    // Vida útil: cada unidad retornada hizo un ciclo de lavado (prorrateo sobre el circulante).
+    cicloService.registrarCiclosRetorno(it.tipo_prenda_id, it.cantidad, fecha);
+    // Prendas identificadas de la línea → reingreso (EN_SECTOR, ciclos+1) o baja (descarte).
+    prendaService.aplicarRetorno(it, envio.sector_id, fecha);
   }
 
   // Conciliación automática (se une a esta misma transacción por re-entrancia).
