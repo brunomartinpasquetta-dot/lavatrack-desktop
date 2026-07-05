@@ -33,3 +33,33 @@ export function formatKg(n) {
   })
   return `${fmt.format(valor)} kg`
 }
+
+// 1.234 (entero con separador de miles es-AR)
+const numFmt = new Intl.NumberFormat('es-AR')
+export function formatNum(n) {
+  const valor = Number(n)
+  if (n === null || n === undefined || Number.isNaN(valor)) return '0'
+  return numFmt.format(valor)
+}
+
+// 12,3 % (un decimal)
+export function formatPct(n) {
+  const valor = Number(n)
+  if (n === null || n === undefined || Number.isNaN(valor)) return '0 %'
+  return `${new Intl.NumberFormat('es-AR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(valor)} %`
+}
+
+// Días transcurridos desde una fecha (YYYY-MM-DD o ISO), respecto de hoy.
+export function diasDesde(iso) {
+  if (!iso) return 0
+  const f = new Date(String(iso).slice(0, 10) + 'T00:00:00')
+  const hoy = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00')
+  return Math.max(0, Math.round((hoy - f) / 86400000))
+}
+
+// Semáforo de antigüedad (días): <3 ok (verde), 3-6 bajo (amber), 7+ crítico (rose).
+export function nivelAntiguedad(dias) {
+  if (dias >= 7) return 'critico'
+  if (dias >= 3) return 'bajo'
+  return 'ok'
+}

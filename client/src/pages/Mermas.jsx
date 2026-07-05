@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { get, qs } from '../api.js'
 import Card from '../components/Card.jsx'
 import KpiCard from '../components/KpiCard.jsx'
-import { PageHeader, Cargando, ErrorMsg } from '../components/ui.jsx'
+import { ModuleHeader, Cargando, ErrorMsg } from '../components/ui.jsx'
 import { formatARS, formatFecha } from '../utils/format.js'
 
 const claseInput =
@@ -47,7 +47,11 @@ export default function Mermas() {
 
   return (
     <div>
-      <PageHeader titulo="Mermas" descripcion="Reporte de faltantes y bajas por período" />
+      <ModuleHeader
+        titulo="Mermas y calidad"
+        descripcion="Reporte de faltantes y bajas por período"
+        breadcrumb={['Control', 'Mermas y calidad']}
+      />
 
       <Card className="mb-6 p-4">
         <div className="flex flex-wrap items-end gap-3">

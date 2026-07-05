@@ -13,6 +13,32 @@ export function PageHeader({ titulo, descripcion, accion }) {
   )
 }
 
+// Encabezado de MÓDULO: breadcrumb + título + acción primaria a la derecha del título.
+// breadcrumb = array de strings (ej: ['Operación', 'Reposición del día']).
+export function ModuleHeader({ titulo, descripcion, breadcrumb, accion }) {
+  return (
+    <div className="mb-5">
+      {breadcrumb && breadcrumb.length > 0 && (
+        <nav className="mb-1 flex items-center gap-1.5 text-xs text-slate-400">
+          {breadcrumb.map((b, i) => (
+            <span key={i} className="flex items-center gap-1.5">
+              {i > 0 && <span className="text-slate-300">/</span>}
+              <span className={i === breadcrumb.length - 1 ? 'text-slate-500' : ''}>{b}</span>
+            </span>
+          ))}
+        </nav>
+      )}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-800">{titulo}</h1>
+          {descripcion && <p className="mt-0.5 text-sm text-slate-500">{descripcion}</p>}
+        </div>
+        {accion && <div className="shrink-0">{accion}</div>}
+      </div>
+    </div>
+  )
+}
+
 // Estado de carga simple.
 export function Cargando({ texto = 'Cargando…' }) {
   return (

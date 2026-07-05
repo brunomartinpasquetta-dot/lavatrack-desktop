@@ -1,4 +1,5 @@
-// Badge de estado de remito. Mapea cada estado a los colores del contrato.
+// Badge unificado: estados de remito, semáforo de stock, métodos de reposición y
+// genéricos por tono. Un solo componente para toda la app (evita colores sueltos).
 
 const ESTILOS_ESTADO = {
   BORRADOR: 'bg-slate-100 text-slate-700',
@@ -7,7 +8,6 @@ const ESTILOS_ESTADO = {
   CONCILIADO: 'bg-emerald-100 text-emerald-700',
   CON_DIFERENCIA: 'bg-rose-100 text-rose-700',
 }
-
 const ETIQUETAS_ESTADO = {
   BORRADOR: 'Borrador',
   ENVIADO: 'Enviado',
@@ -16,14 +16,61 @@ const ETIQUETAS_ESTADO = {
   CON_DIFERENCIA: 'Con diferencia',
 }
 
-export default function Badge({ estado, children, className = '' }) {
-  const clase = ESTILOS_ESTADO[estado] || 'bg-slate-100 text-slate-700'
-  const texto = children || ETIQUETAS_ESTADO[estado] || estado
+// Semáforo de stock (ok / bajo / critico).
+const ESTILOS_NIVEL = {
+  ok: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+  bajo: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  critico: 'bg-rose-50 text-rose-700 ring-1 ring-rose-200',
+}
+const PUNTO_NIVEL = { ok: 'bg-emerald-500', bajo: 'bg-amber-500', critico: 'bg-rose-500' }
+const ETIQUETA_NIVEL = { ok: 'OK', bajo: 'Bajo', critico: 'Crítico' }
+
+// Método de reposición del sector.
+const ESTILOS_METODO = {
+  PAR: 'bg-teal-50 text-teal-700 ring-1 ring-teal-200',
+  CARRO_INTERCAMBIO: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200',
+  PEDIDO: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
+}
+const ETIQUETA_METODO = { PAR: 'Par', CARRO_INTERCAMBIO: 'Carro', PEDIDO: 'Pedido' }
+
+// Tonos genéricos para conteos / aging.
+const ESTILOS_TONO = {
+  slate: 'bg-slate-100 text-slate-600',
+  teal: 'bg-teal-100 text-teal-700',
+  emerald: 'bg-emerald-100 text-emerald-700',
+  amber: 'bg-amber-100 text-amber-700',
+  rose: 'bg-rose-100 text-rose-700',
+  sky: 'bg-sky-100 text-sky-700',
+}
+
+const BASE = 'inline-flex items-center gap-1.5 rounded-full text-xs font-medium whitespace-nowrap'
+
+export default function Badge({ estado, nivel, metodo, tono, children, className = '' }) {
+  let clase = ESTILOS_TONO.slate
+  let texto = children
+  let dot = null
+
+  if (estado != null) {
+    clase = ESTILOS_ESTADO[estado] || ESTILOS_TONO.slate
+    texto = texto ?? (ETIQUETAS_ESTADO[estado] || estado)
+  } else if (nivel != null) {
+    clase = ESTILOS_NIVEL[nivel] || ESTILOS_NIVEL.ok
+    texto = texto ?? (ETIQUETA_NIVEL[nivel] || nivel)
+    dot = <span className={`h-1.5 w-1.5 rounded-full ${PUNTO_NIVEL[nivel] || PUNTO_NIVEL.ok}`} />
+  } else if (metodo != null) {
+    clase = ESTILOS_METODO[metodo] || ESTILOS_TONO.slate
+    texto = texto ?? (ETIQUETA_METODO[metodo] || metodo)
+  } else if (tono != null) {
+    clase = ESTILOS_TONO[tono] || ESTILOS_TONO.slate
+  }
+
   return (
-    <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${clase} ${className}`}
-    >
+    <span className={`${BASE} px-2.5 py-0.5 ${clase} ${className}`}>
+      {dot}
       {texto}
     </span>
   )
 }
+
+// Export auxiliar para leyendas del semáforo.
+export const NIVEL_META = { PUNTO_NIVEL, ETIQUETA_NIVEL }

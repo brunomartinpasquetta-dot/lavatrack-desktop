@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { get, put } from '../api.js'
 import Card from '../components/Card.jsx'
-import { PageHeader, Cargando, ErrorMsg } from '../components/ui.jsx'
+import { ModuleHeader, Cargando, ErrorMsg } from '../components/ui.jsx'
 import { useConexion } from '../context/ConexionContext.jsx'
 
 // Pantalla de Ajustes: puerto del servidor + acceso para terminales.
@@ -71,7 +71,11 @@ export default function Ajustes() {
 
   return (
     <div>
-      <PageHeader titulo="Ajustes" descripcion="Configuración de la instalación de LavaTrack" />
+      <ModuleHeader
+        titulo="Ajustes"
+        descripcion="Configuración de la instalación de LavaTrack"
+        breadcrumb={['Sistema', 'Ajustes']}
+      />
 
       {/* Puerto del servidor */}
       <Card className="mb-6">
