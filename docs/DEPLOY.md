@@ -228,6 +228,15 @@ npx electron-builder --win --x64 --publish never --config.compression=store
 - **Sin internet = silencio**: si no hay conexión, el updater no molesta ni muestra errores; simplemente no actualiza.
 - **En macOS, sin firma de Apple, el auto-update no se aplica solo.** Hay que **instalar el `.dmg` a mano**. Es una lección heredada de StockFlow: sin firma, macOS no deja que el update se instale automáticamente. En Windows el `.exe` (NSIS x64) tampoco está firmado, así que SmartScreen va a pedir **"Más información → Ejecutar de todas formas"** la primera vez.
 
+### 5b. Primera apertura en la máquina del cliente (apps sin firma)
+
+Ni el `.app` de macOS ni el `.exe` de Windows están **notarizados/firmados con certificado** (no hay cuenta Apple Developer ni firma de código Windows). El `.app` de macOS **sí lleva firma ad-hoc consistente** (hook `afterPack` → `codesign --force --deep --sign -`), lo que evita el error **"LavaTrack está dañado y no se puede abrir"**. Aun así, la primera vez el sistema pide confirmación:
+
+- **macOS** (Gatekeeper): al abrir el `.dmg` y arrastrar la app, la primera ejecución muestra **"No se puede abrir porque Apple no puede comprobar si contiene software malicioso"**. Solución del cliente: **click derecho sobre LavaTrack → Abrir → Abrir** (una sola vez; después abre normal). *No* aparece "dañado" gracias a la firma ad-hoc. Alternativa: Ajustes del Sistema → Privacidad y seguridad → "Abrir de todas formas".
+- **Windows** (SmartScreen): al ejecutar el instalador, aparece **"Windows protegió tu PC"**. Solución del cliente: **"Más información" → "Ejecutar de todas formas"** (una sola vez).
+
+> **Para producción a escala:** conviene firmar/notarizar macOS (Apple Developer, USD 99/año) y firmar el `.exe` de Windows (certificado de firma de código). Eso elimina ambos avisos.
+
 ### 6. Diferencias con StockFlow
 
 Todo el modelo es igual al de StockFlow (GitHub Releases como feed, repo público, tags semver, canal único estable `latest*.yml`, chequeo al iniciar + cada 4h, sin firma). Las únicas diferencias:

@@ -60,12 +60,16 @@ if [ "$DRY_RUN" = false ]; then
 fi
 
 # --- 2) Build Windows x64 con wine ---
+# Limpiar artefactos Windows previos (si no, un .exe viejo de otra versión puede colarse).
+rm -f "$DIST"/*setup*.exe "$DIST"/*setup*.exe.blockmap "$DIST"/latest.yml 2>/dev/null
 echo "▶ Buildeando cliente + instalador Windows x64 (wine se descarga solo)…"
 npm --prefix client run build >/dev/null
-( cd electron && npx electron-builder --win --x64 --publish never --config.compression=store )
+# Compresión normal (default): makensis local con wine NO se cuelga, así que no hace falta
+# 'store' (que dejaba el instalador ~3x más pesado). 'store' era mitigación del cuelgue en CI.
+( cd electron && npx electron-builder --win --x64 --publish never )
 
-# --- 3) Verificar artefactos ---
-EXE="$(ls "$DIST"/*setup*.exe 2>/dev/null | head -1)"
+# --- 3) Verificar artefactos (por nombre exacto de versión, no por glob) ---
+EXE="$DIST/LavaTrack-${VERSION}-setup.exe"
 YML="$DIST/latest.yml"
 BLOCKMAP="$(ls "$DIST"/*setup*.exe.blockmap 2>/dev/null | head -1)"
 [ -n "$EXE" ] && [ -f "$EXE" ] || { echo "ERROR: no se generó el .exe en $DIST" >&2; exit 1; }
