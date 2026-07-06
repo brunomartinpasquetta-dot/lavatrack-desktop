@@ -33,6 +33,14 @@ const ESTILOS_METODO = {
 }
 const ETIQUETA_METODO = { PAR: 'Par', CARRO_INTERCAMBIO: 'Carro', PEDIDO: 'Pedido' }
 
+// Roles de usuario.
+const ESTILOS_ROL = {
+  ADMIN: 'bg-indigo-100 text-indigo-700',
+  SUPERVISOR: 'bg-sky-100 text-sky-700',
+  OPERARIO: 'bg-slate-100 text-slate-600',
+}
+const ETIQUETA_ROL = { ADMIN: 'Admin', SUPERVISOR: 'Supervisor', OPERARIO: 'Operario' }
+
 // Tonos genéricos para conteos / aging.
 const ESTILOS_TONO = {
   slate: 'bg-slate-100 text-slate-600',
@@ -45,7 +53,7 @@ const ESTILOS_TONO = {
 
 const BASE = 'inline-flex items-center gap-1.5 rounded-full text-xs font-medium whitespace-nowrap'
 
-export default function Badge({ estado, nivel, metodo, tono, children, className = '' }) {
+export default function Badge({ estado, nivel, metodo, rol, tono, children, className = '' }) {
   let clase = ESTILOS_TONO.slate
   let texto = children
   let dot = null
@@ -60,6 +68,9 @@ export default function Badge({ estado, nivel, metodo, tono, children, className
   } else if (metodo != null) {
     clase = ESTILOS_METODO[metodo] || ESTILOS_TONO.slate
     texto = texto ?? (ETIQUETA_METODO[metodo] || metodo)
+  } else if (rol != null) {
+    clase = ESTILOS_ROL[rol] || ESTILOS_TONO.slate
+    texto = texto ?? (ETIQUETA_ROL[rol] || rol)
   } else if (tono != null) {
     clase = ESTILOS_TONO[tono] || ESTILOS_TONO.slate
   }

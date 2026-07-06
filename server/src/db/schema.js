@@ -177,6 +177,23 @@ CREATE TABLE IF NOT EXISTS prendas_identificadas (
   fecha_baja TEXT
 );
 
+-- ============================================================================
+-- Auth (Fase 1): usuarios del sistema con rol y credenciales scrypt.
+-- password_hash/password_salt guardan el scrypt canónico (scryptSync keylen 64,
+-- salt hex de 16 bytes, todo en hex) que el server usa para verificar el login.
+-- rol define el nivel de acceso: ADMIN > SUPERVISOR > OPERARIO.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS usuarios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  usuario TEXT NOT NULL UNIQUE,
+  nombre TEXT NOT NULL,
+  rol TEXT NOT NULL CHECK (rol IN ('ADMIN','SUPERVISOR','OPERARIO')),
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  activo INTEGER NOT NULL DEFAULT 1,
+  fecha_alta TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_dotacion_sector ON dotacion_par(sector_id);
 CREATE INDEX IF NOT EXISTS idx_remitos_tipo_estado ON remitos(tipo, estado);
 CREATE INDEX IF NOT EXISTS idx_remitos_envio ON remitos(remito_envio_id);
@@ -189,4 +206,7 @@ CREATE INDEX IF NOT EXISTS idx_inv_items_inv ON inventario_items(inventario_id);
 CREATE INDEX IF NOT EXISTS idx_ajustes_fecha ON ajustes(fecha);
 CREATE INDEX IF NOT EXISTS idx_presets_items_preset ON presets_items(preset_id);
 CREATE INDEX IF NOT EXISTS idx_prendas_estado ON prendas_identificadas(estado);
+-- Índice de auth: búsqueda por nombre de usuario en el login (usuario ya es UNIQUE,
+-- el índice lo respalda explícitamente y documenta la intención de la query caliente).
+CREATE INDEX IF NOT EXISTS idx_usuarios_usuario ON usuarios(usuario);
 `;

@@ -9,5 +9,7 @@ export class ErrorAPI extends Error {
 }
 
 export const errorValidacion = (msg) => new ErrorAPI(400, msg);
+export const errorAuth = (msg) => new ErrorAPI(401, msg);
+export const errorProhibido = (msg) => new ErrorAPI(403, msg);
 export const errorNoEncontrado = (msg) => new ErrorAPI(404, msg);
 export const errorConflicto = (msg) => new ErrorAPI(409, msg);

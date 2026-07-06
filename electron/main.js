@@ -363,6 +363,20 @@ function crearVentana() {
     },
   });
 
+  // AUD-016 — Hardening de navegación:
+  // 1) Denegar la apertura de ventanas nuevas (window.open, target=_blank, etc.).
+  //    Si en el futuro se quisiera abrir un enlace externo, se hace con shell.openExternal.
+  ventana.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // 2) Bloquear cualquier navegación fuera del origen local (http://localhost:puerto).
+  //    Los estáticos, la API y el router del SPA viven todos ahí; nada legítimo navega afuera.
+  const origenLocal = `http://localhost:${puerto}`;
+  ventana.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith(`${origenLocal}/`) && url !== origenLocal) {
+      e.preventDefault();
+      console.warn('[LavaTrack] Navegación externa bloqueada:', url);
+    }
+  });
+
   // El SPA + la API viven en el mismo origen (localhost:puerto) → el router del cliente funciona.
   ventana.loadURL(`http://localhost:${puerto}`);
 

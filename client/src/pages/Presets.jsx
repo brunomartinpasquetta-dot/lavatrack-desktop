@@ -7,6 +7,7 @@ import { ModuleHeader, Cargando, ErrorMsg } from '../components/ui.jsx'
 import { formatNum } from '../utils/format.js'
 import { useConexion } from '../context/ConexionContext.jsx'
 import { useToast } from '../context/ToastContext.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 
 const claseInput =
   'w-full min-h-[44px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500'
@@ -18,6 +19,8 @@ function lineaVacia() {
 export default function Presets() {
   const { online } = useConexion()
   const toast = useToast()
+  const { rolAlMenos } = useAuth()
+  const puedeEliminar = rolAlMenos('SUPERVISOR')
 
   const [presets, setPresets] = useState(null)
   const [sectores, setSectores] = useState([])
@@ -292,12 +295,14 @@ export default function Presets() {
                         >
                           Editar
                         </button>
-                        <button
-                          onClick={() => eliminar(p)}
-                          className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
-                        >
-                          Eliminar
-                        </button>
+                        {puedeEliminar && (
+                          <button
+                            onClick={() => eliminar(p)}
+                            className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
+                          >
+                            Eliminar
+                          </button>
+                        )}
                       </div>
                     </Td>
                   </Fila>

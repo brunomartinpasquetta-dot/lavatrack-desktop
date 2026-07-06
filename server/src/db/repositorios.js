@@ -636,3 +636,62 @@ export const prendasRepo = {
       .run(...params);
   },
 };
+
+// ---------- Usuarios (auth Fase 1) ----------
+// Nunca se exponen password_hash/password_salt hacia arriba salvo en obtenerPorUsuario,
+// que el authService necesita para verificar el login. El resto de las lecturas para
+// pantallas (listar/obtener) devuelven la fila completa; el service decide qué proyectar.
+export const usuariosRepo = {
+  // Listado para la pantalla de administración (ordenado por usuario).
+  listar() {
+    return getDb()
+      .prepare('SELECT id, usuario, nombre, rol, activo, fecha_alta FROM usuarios ORDER BY usuario')
+      .all();
+  },
+  obtener(id) {
+    return getDb()
+      .prepare('SELECT id, usuario, nombre, rol, activo, fecha_alta FROM usuarios WHERE id = ?')
+      .get(id) || null;
+  },
+  // Trae la fila COMPLETA (con hash+salt): la usa el login para verificar la clave.
+  obtenerPorUsuario(usuario) {
+    return getDb()
+      .prepare('SELECT * FROM usuarios WHERE usuario = ?')
+      .get(usuario) || null;
+  },
+  existeUsuario(usuario) {
+    const row = getDb()
+      .prepare('SELECT 1 FROM usuarios WHERE usuario = ? LIMIT 1')
+      .get(usuario);
+    return !!row;
+  },
+  crear({ usuario, nombre, rol, password_hash, password_salt, fecha_alta }) {
+    const info = getDb()
+      .prepare(
+        `INSERT INTO usuarios (usuario, nombre, rol, password_hash, password_salt, activo, fecha_alta)
+         VALUES (?, ?, ?, ?, ?, 1, ?)`
+      )
+      .run(usuario, nombre, rol, password_hash, password_salt, fecha_alta);
+    return Number(info.lastInsertRowid);
+  },
+  // Update de perfil/estado (no toca credenciales). activo se normaliza a 0/1.
+  actualizar(id, { nombre, rol, activo }) {
+    getDb()
+      .prepare('UPDATE usuarios SET nombre = ?, rol = ?, activo = ? WHERE id = ?')
+      .run(nombre, rol, activo ? 1 : 0, id);
+    return this.obtener(id);
+  },
+  // Cambio de clave: pisa hash+salt (ya generados con el scrypt canónico por el service).
+  setPassword(id, { password_hash, password_salt }) {
+    getDb()
+      .prepare('UPDATE usuarios SET password_hash = ?, password_salt = ? WHERE id = ?')
+      .run(password_hash, password_salt, id);
+  },
+  // Cantidad de usuarios ACTIVOS de un rol (guard del "último ADMIN activo").
+  contarPorRol(rol) {
+    const row = getDb()
+      .prepare('SELECT COUNT(*) AS n FROM usuarios WHERE rol = ? AND activo = 1')
+      .get(rol);
+    return row.n;
+  },
+};

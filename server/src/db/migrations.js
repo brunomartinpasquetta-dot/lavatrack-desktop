@@ -169,6 +169,30 @@ export function correrMigraciones(db) {
     cambios.push('movimientos_stock (CHECK ampliado con AJUSTE)');
   }
 
+  // --- M7: usuarios (auth Fase 1) ---
+  // La tabla usuarios + idx_usuarios_usuario los crea el esquema base (SCHEMA_SQL,
+  // IF NOT EXISTS), igual que dotacion_par (M3) y el refactor de dominio (M6). NO se
+  // duplica el CREATE TABLE acá. La carga de los usuarios demo la hace el seed.
+  //
+  // Guard anti-lockout (idempotente): si la tabla YA tiene usuarios pero ninguno es
+  // ADMIN activo, se reactiva el ADMIN de menor id (evita quedar sin acceso admin sobre
+  // una base migrada). Si no existe ningún ADMIN, no hace nada (el seed crea el admin).
+  const hayUsuarios = db.prepare('SELECT COUNT(*) AS n FROM usuarios').get().n;
+  if (hayUsuarios > 0) {
+    const adminsActivos = db
+      .prepare("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'ADMIN' AND activo = 1")
+      .get().n;
+    if (adminsActivos === 0) {
+      const info = db
+        .prepare(
+          `UPDATE usuarios SET activo = 1
+            WHERE id = (SELECT id FROM usuarios WHERE rol = 'ADMIN' ORDER BY id LIMIT 1)`
+        )
+        .run();
+      if (info.changes > 0) cambios.push('usuarios (reactivado 1 ADMIN para garantizar acceso)');
+    }
+  }
+
   if (cambios.length) {
     console.log('[migrations] Aplicadas:', cambios.join(', '));
   }

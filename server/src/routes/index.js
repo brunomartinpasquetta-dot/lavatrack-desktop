@@ -1,4 +1,6 @@
 // Enrutador principal de la API. Monta todas las rutas bajo el prefijo /api.
+// Seguridad: /health y /auth/login son PÚBLICAS; el resto exige Bearer (autenticar)
+// y algunas rutas además exigen un rol mínimo (requireRol).
 import { Router } from 'express';
 import * as remitos from '../controllers/remitosController.js';
 import * as reportes from '../controllers/reportesController.js';
@@ -9,11 +11,18 @@ import * as inventarios from '../controllers/inventarioController.js';
 import * as ajustes from '../controllers/ajusteController.js';
 import * as presets from '../controllers/presetController.js';
 import * as prendas from '../controllers/prendaController.js';
+import * as auth from '../controllers/authController.js';
+import { usuarios } from '../controllers/usuarioController.js';
+import { autenticar, requireRol } from '../middleware/auth.js';
 import { ipsLan } from '../net.js';
 import { leerConfig, escribirConfig } from '../config.js';
 import { errorValidacion } from '../services/errores.js';
 
 const router = Router();
+
+// ============================================================
+// RUTAS PÚBLICAS (sin token) — deben ir ANTES de autenticar.
+// ============================================================
 
 // Health-check liviano: lo consultan las terminales para detectar caída del servidor.
 router.get('/health', (req, res) => {
@@ -26,9 +35,20 @@ router.get('/health', (req, res) => {
   });
 });
 
-// Configuración de la instalación (puerto). Cambiar el puerto requiere reiniciar la app.
-router.get('/config', (req, res) => res.json(leerConfig()));
-router.put('/config', (req, res) => {
+// Login: emite el token. Público (sin él no habría forma de autenticarse).
+router.post('/auth/login', auth.login);
+
+// ============================================================
+// A PARTIR DE ACÁ, TODO EXIGE BEARER TOKEN VÁLIDO.
+// ============================================================
+router.use(autenticar);
+
+// Usuario actual (según el token).
+router.get('/auth/me', auth.me);
+
+// Configuración de la instalación (puerto). Solo ADMIN. Cambiar el puerto requiere reiniciar.
+router.get('/config', requireRol('ADMIN'), (req, res) => res.json(leerConfig()));
+router.put('/config', requireRol('ADMIN'), (req, res) => {
   const puerto = Number(req.body?.puerto);
   if (!Number.isInteger(puerto) || puerto < 1024 || puerto > 65535) {
     throw errorValidacion('El puerto debe ser un entero entre 1024 y 65535.');
@@ -36,6 +56,13 @@ router.put('/config', (req, res) => {
   const config = escribirConfig({ puerto });
   res.json({ config, reiniciar: true });
 });
+
+// Administración de usuarios (solo ADMIN).
+router.get('/usuarios', requireRol('ADMIN'), usuarios.listar);
+router.post('/usuarios', requireRol('ADMIN'), usuarios.crear);
+router.put('/usuarios/:id', requireRol('ADMIN'), usuarios.actualizar);
+router.put('/usuarios/:id/password', requireRol('ADMIN'), usuarios.password);
+router.put('/usuarios/:id/activo', requireRol('ADMIN'), usuarios.activo);
 
 // Reportes / vistas calculadas
 router.get('/dashboard', reportes.dashboard);
@@ -52,17 +79,17 @@ router.post('/remitos', remitos.crear);
 router.get('/remitos/:id', remitos.detalle);
 router.post('/remitos/:id/conciliar', remitos.conciliarRemito);
 
-// Catálogo: tipos de prenda
+// Catálogo: tipos de prenda (DELETE requiere SUPERVISOR o superior)
 router.get('/tipos-prenda', tipos.listar);
 router.post('/tipos-prenda', tipos.crear);
 router.put('/tipos-prenda/:id', tipos.actualizar);
-router.delete('/tipos-prenda/:id', tipos.eliminar);
+router.delete('/tipos-prenda/:id', requireRol('SUPERVISOR'), tipos.eliminar);
 
-// Catálogo: sectores
+// Catálogo: sectores (DELETE requiere SUPERVISOR o superior)
 router.get('/sectores', sectores.listar);
 router.post('/sectores', sectores.crear);
 router.put('/sectores/:id', sectores.actualizar);
-router.delete('/sectores/:id', sectores.eliminar);
+router.delete('/sectores/:id', requireRol('SUPERVISOR'), sectores.eliminar);
 
 // Vida útil por ciclos
 router.get('/ciclos', ciclos.listar);

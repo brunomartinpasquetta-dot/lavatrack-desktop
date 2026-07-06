@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { get } from '../api.js'
+import Badge from './Badge.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
 
 // Íconos SVG inline propios (sin librerías externas).
 const sv = (p) => (
@@ -23,6 +25,8 @@ const iconos = {
   presets: sv(<><rect x="3" y="4" width="18" height="4" rx="1" /><rect x="3" y="10" width="18" height="4" rx="1" /><rect x="3" y="16" width="18" height="4" rx="1" /></>),
   identificadas: sv(<><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 9v6M10 9v6M13 9v6M17 9v6" strokeLinecap="round" /></>),
   ajustes: sv(<><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" strokeLinecap="round" strokeLinejoin="round" /></>),
+  usuarios: sv(<><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13A4 4 0 0 1 16 11" strokeLinecap="round" strokeLinejoin="round" /></>),
+  salir: sv(<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" strokeLinecap="round" strokeLinejoin="round" /><path d="M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round" /></>),
 }
 
 function Logo() {
@@ -65,7 +69,10 @@ const grupos = [
   },
   {
     titulo: 'Sistema',
-    items: [{ to: '/ajustes', label: 'Ajustes', icono: iconos.ajustes }],
+    items: [
+      { to: '/usuarios', label: 'Usuarios', icono: iconos.usuarios, rol: 'ADMIN' },
+      { to: '/ajustes', label: 'Ajustes', icono: iconos.ajustes, rol: 'ADMIN' },
+    ],
   },
 ]
 
@@ -75,7 +82,14 @@ const claseLink = ({ isActive }) =>
   }`
 
 export default function Sidebar() {
+  const { usuario, logout, rolAlMenos } = useAuth()
   const [pendientes, setPendientes] = useState(0)
+
+  // Gating por rol (UX): ocultamos ítems y grupos que el rol no puede usar.
+  // La seguridad real la valida el servidor; esto sólo evita fricción.
+  const gruposVisibles = grupos
+    .map((g) => ({ ...g, items: g.items.filter((it) => !it.rol || rolAlMenos(it.rol)) }))
+    .filter((g) => g.items.length > 0)
 
   // Contador de envíos ENVIADO sin retorno (badge en "Retornos").
   useEffect(() => {
@@ -100,7 +114,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-y-auto px-3 py-3">
-        {grupos.map((g) => (
+        {gruposVisibles.map((g) => (
           <div key={g.titulo} className="mb-3">
             <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
               {g.titulo}
@@ -139,8 +153,24 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-slate-100 px-5 py-3 text-[11px] text-slate-400">
-        Demo · Clínica privada
+      <div className="border-t border-slate-100 px-3 py-3">
+        {usuario && (
+          <div className="mb-2 flex items-center gap-2 px-2">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-slate-700">{usuario.nombre}</p>
+              <div className="mt-0.5">
+                <Badge rol={usuario.rol} />
+              </div>
+            </div>
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-rose-50 hover:text-rose-700"
+        >
+          {iconos.salir}
+          <span>Cerrar sesión</span>
+        </button>
       </div>
     </aside>
   )

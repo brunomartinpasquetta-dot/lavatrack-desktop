@@ -1,13 +1,52 @@
 // Seed de datos de ejemplo de LavaTrack.
 // Genera 60 días de historia realista para que la demo no arranque vacía.
 // Es idempotente a nivel "arranque": index.js solo lo corre si la base está vacía.
+import crypto from 'node:crypto';
 import { getDb, baseVacia } from './connection.js';
 import {
   sectoresRepo, tiposRepo, stockRepo, bajasRepo, dotacionRepo,
   ciclosRepo, inventariosRepo, ajustesRepo, presetsRepo, prendasRepo,
+  usuariosRepo,
 } from './repositorios.js';
 import { crearRemito } from '../services/remitosService.js';
 import { enTransaccion } from './tx.js';
+
+// Usuarios demo para el arranque de la auth. Claves de DEMO (documentadas en el reporte).
+// El hash usa EXACTAMENTE el scrypt canónico que el server usa para verificar el login:
+//   salt = crypto.randomBytes(16).toString('hex')
+//   hash = crypto.scryptSync(password, salt, 64).toString('hex')
+const USUARIOS_DEMO = [
+  { usuario: 'admin', password: 'admin1234', rol: 'ADMIN',      nombre: 'Administrador' },
+  { usuario: 'super', password: 'super1234', rol: 'SUPERVISOR', nombre: 'Supervisora Ropería' },
+  { usuario: 'oper',  password: 'oper1234',  rol: 'OPERARIO',   nombre: 'Operario Turno' },
+];
+
+// Siembra los 3 usuarios demo SOLO si todavía no hay ningún usuario cargado.
+// Es idempotente por su propio guard (contarPorRol total = 0) e independiente del
+// guard baseVacia: una base preexistente (anterior a la auth) también recibe los usuarios.
+export function sembrarUsuariosDemo() {
+  const db = getDb();
+  const { n } = db.prepare('SELECT COUNT(*) AS n FROM usuarios').get();
+  if (n > 0) return 0;
+
+  const fechaAlta = new Date().toISOString();
+  enTransaccion(() => {
+    for (const u of USUARIOS_DEMO) {
+      const password_salt = crypto.randomBytes(16).toString('hex');
+      const password_hash = crypto.scryptSync(u.password, password_salt, 64).toString('hex');
+      usuariosRepo.crear({
+        usuario: u.usuario,
+        nombre: u.nombre,
+        rol: u.rol,
+        password_hash,
+        password_salt,
+        fecha_alta: fechaAlta,
+      });
+    }
+  });
+  console.log(`[seed] Usuarios demo sembrados: ${USUARIOS_DEMO.map((u) => u.usuario).join(', ')}.`);
+  return USUARIOS_DEMO.length;
+}
 
 // PRNG determinístico (LCG) para que la demo genere siempre los mismos datos.
 let _semilla = 20260703;
@@ -68,6 +107,11 @@ const STOCK_BAJO_FORZADO = [
 
 export function correrSeed() {
   const db = getDb();
+
+  // Los usuarios demo se siembran aparte del resto (su propio guard "no hay usuarios"),
+  // así el login funciona incluso sobre una base preexistente sin usuarios. No duplica.
+  sembrarUsuariosDemo();
+
   if (!baseVacia()) {
     console.log('[seed] La base ya tiene datos; no se vuelve a sembrar.');
     return;
