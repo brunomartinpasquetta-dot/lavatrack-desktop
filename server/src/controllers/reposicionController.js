@@ -6,6 +6,8 @@ export function reposicion(req, res) {
 }
 
 export function distribuir(req, res) {
-  const distribucion = generarDistribucion(req.body || {});
+  // AUD-010: header Idempotency-Key opcional para evitar duplicar la distribución en reintentos.
+  const idempotencyKey = (req.get('Idempotency-Key') || '').trim() || null;
+  const distribucion = generarDistribucion(req.body || {}, idempotencyKey);
   res.status(201).json(distribucion);
 }

@@ -1,8 +1,9 @@
 // "Reposición del día": sugiere cuánto entregar a cada sector para volver a su dotación par,
 // y genera el remito de distribución interna (Ropería Central → sector) con su movimiento de stock.
-import { sectoresRepo, dotacionRepo, stockRepo, tiposRepo, distribucionesRepo } from '../db/repositorios.js';
+import { sectoresRepo, dotacionRepo, stockRepo, tiposRepo, distribucionesRepo, idempotenciaRepo } from '../db/repositorios.js';
 import { enTransaccion } from '../db/tx.js';
 import { errorValidacion } from './errores.js';
+import { validarFirmante } from './remitosService.js';
 import * as cicloService from './cicloService.js';
 
 const NOMBRE_ROPERIA = 'Ropería Central';
@@ -61,7 +62,17 @@ export function calcularReposicion() {
 }
 
 // Genera el remito de distribución interna: mueve stock de Ropería Central al sector.
-export function generarDistribucion(payload) {
+// Acepta una idempotencyKey opcional (AUD-010): si ya hay una distribución asociada a esa
+// key, se devuelve esa (no se crea otra), evitando duplicados por reintento tras corte de red.
+export function generarDistribucion(payload, idempotencyKey = null) {
+  // Fast-path idempotente: key ya registrada → devolver la distribución existente.
+  if (idempotencyKey) {
+    const previo = idempotenciaRepo.buscar(idempotencyKey);
+    if (previo) return distribucionesRepo.obtener(previo.entidad_id);
+  }
+
+  const firmante = validarFirmante(payload.firmante); // AUD-015
+
   const sector = sectoresRepo.obtener(payload.sector_id);
   if (!sector) throw errorValidacion(`No existe el sector con id ${payload.sector_id}.`);
 
@@ -96,10 +107,12 @@ export function generarDistribucion(payload) {
       numero: distribucionesRepo.proximoNumero(),
       fecha,
       sector_id: sector.id,
-      firmante: payload.firmante,
+      firmante,
       observaciones: payload.observaciones,
       lineas: items,
     });
+    // AUD-010: registrar la key dentro de la MISMA tx (UNIQUE previene la carrera).
+    if (idempotencyKey) idempotenciaRepo.registrar(idempotencyKey, 'DISTRIBUCION', id);
 
     for (const it of items) {
       // Vida útil: las unidades que ingresan diluyen el promedio de ciclos del tipo.

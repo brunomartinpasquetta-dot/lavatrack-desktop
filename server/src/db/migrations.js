@@ -217,6 +217,12 @@ export function correrMigraciones(db) {
     }
   }
 
+  // --- M9: integridad Ola 3 (AUD-010/012) ---
+  // La tabla idempotencia y el índice idx_remitos_fecha los crea el esquema base
+  // (SCHEMA_SQL, IF NOT EXISTS), igual que dotacion_par (M3), el refactor de dominio
+  // (M6) y usuarios (M7). NO se duplica el CREATE acá; no hay cambios in-place sobre
+  // tablas EXISTENTES para este lote.
+
   if (cambios.length) {
     console.log('[migrations] Aplicadas:', cambios.join(', '));
   }

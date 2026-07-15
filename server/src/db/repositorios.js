@@ -114,7 +114,8 @@ export const remitosRepo = {
     return `LT-${anio}-${String(siguiente).padStart(4, '0')}`;
   },
 
-  listar(filtros = {}) {
+  // Construye el WHERE compartido por listar() y contar() (mismos filtros).
+  _whereFiltros(filtros = {}) {
     const where = [];
     const params = [];
     if (filtros.estado) { where.push('r.estado = ?'); params.push(filtros.estado); }
@@ -122,14 +123,37 @@ export const remitosRepo = {
     if (filtros.tipo) { where.push('r.tipo = ?'); params.push(filtros.tipo); }
     if (filtros.desde) { where.push('r.fecha >= ?'); params.push(filtros.desde); }
     if (filtros.hasta) { where.push('r.fecha <= ?'); params.push(filtros.hasta); }
+    return { clausula: where.length ? 'WHERE ' + where.join(' AND ') : '', params };
+  },
+
+  // Lista remitos filtrados y ordenados (fecha DESC, id DESC). Si se pasan
+  // {limit, offset} numéricos, acota la página con LIMIT/OFFSET; si no, trae todo
+  // (compat con los consumidores que esperan el array completo — AUD-012).
+  listar(filtros = {}) {
+    const { clausula, params } = this._whereFiltros(filtros);
+    let paginado = '';
+    const pparams = [...params];
+    if (Number.isInteger(filtros.limit)) {
+      paginado = ' LIMIT ? OFFSET ?';
+      pparams.push(filtros.limit, Number.isInteger(filtros.offset) ? filtros.offset : 0);
+    }
     const sql = `
       SELECT r.*, s.nombre AS sector,
              (SELECT COALESCE(SUM(cantidad),0) FROM remito_items WHERE remito_id = r.id) AS total_prendas
       FROM remitos r
       JOIN sectores s ON s.id = r.sector_id
-      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY r.fecha DESC, r.id DESC`;
-    return getDb().prepare(sql).all(...params);
+      ${clausula}
+      ORDER BY r.fecha DESC, r.id DESC${paginado}`;
+    return getDb().prepare(sql).all(...pparams);
+  },
+
+  // Total de remitos que matchean los filtros (para paginar). Ignora limit/offset.
+  contar(filtros = {}) {
+    const { clausula, params } = this._whereFiltros(filtros);
+    const row = getDb()
+      .prepare(`SELECT COUNT(*) AS n FROM remitos r ${clausula}`)
+      .get(...params);
+    return row.n;
   },
 
   obtener(id) {
@@ -765,5 +789,26 @@ export const usuariosRepo = {
       .prepare('SELECT COUNT(*) AS n FROM usuarios WHERE rol = ? AND activo = 1')
       .get(rol);
     return row.n;
+  },
+};
+
+// ---------- Idempotencia (AUD-010) ----------
+// Mapea una Idempotency-Key (UUID que manda el cliente) a la entidad que se creó,
+// para que un reintento de la MISMA operación (p. ej. tras corte de red) devuelva
+// el registro original en vez de crear un duplicado. El PRIMARY KEY sobre `clave`
+// hace que un INSERT concurrente con la misma key falle (UNIQUE), cerrando la carrera.
+export const idempotenciaRepo = {
+  // Busca la entidad ya asociada a una clave, o null.
+  buscar(clave) {
+    return getDb()
+      .prepare('SELECT * FROM idempotencia WHERE clave = ?')
+      .get(clave) || null;
+  },
+  // Registra la asociación clave→entidad. Debe llamarse DENTRO de la misma
+  // transacción que crea la entidad; si la clave ya existe, lanza (UNIQUE).
+  registrar(clave, tipo, entidadId) {
+    getDb()
+      .prepare('INSERT INTO idempotencia (clave, tipo, entidad_id, fecha) VALUES (?, ?, ?, ?)')
+      .run(clave, tipo, entidadId, new Date().toISOString());
   },
 };

@@ -1,7 +1,7 @@
 // Lógica de negocio de remitos: creación de envíos/retornos, validaciones y conciliación.
 // Toda escritura multi-tabla va dentro de enTransaccion() (BEGIN IMMEDIATE): así el
 // correlativo y los movimientos de stock son atómicos frente a varias terminales.
-import { remitosRepo, sectoresRepo, tiposRepo, stockRepo, bajasRepo } from '../db/repositorios.js';
+import { remitosRepo, sectoresRepo, tiposRepo, stockRepo, bajasRepo, idempotenciaRepo } from '../db/repositorios.js';
 import { enTransaccion } from '../db/tx.js';
 import { errorValidacion, errorNoEncontrado } from './errores.js';
 import * as cicloService from './cicloService.js';
@@ -14,6 +14,41 @@ const ESTADOS_CONCILIADOS = ['CONCILIADO', 'CON_DIFERENCIA'];
 
 const esEnteroPositivo = (n) => Number.isInteger(n) && n > 0;
 const esEnteroNoNegativo = (n) => Number.isInteger(n) && n >= 0;
+
+// Fecha de hoy en formato YYYY-MM-DD (fecha local del server).
+const hoyISO = () => new Date().toISOString().slice(0, 10);
+
+// Valida y normaliza una fecha de remito (AUD-007). Devuelve la fecha en YYYY-MM-DD.
+// - Si no viene, usa hoy (no se rompe el default).
+// - Debe ser un YYYY-MM-DD real (no "2026-13-40" ni basura) y no futura (<= hoy).
+// - Si se pasa `minima` (fecha del envío), exige fecha >= minima (retorno no anterior al envío).
+export function validarFecha(valor, { minima = null } = {}) {
+  if (valor === undefined || valor === null || valor === '') return hoyISO();
+  if (typeof valor !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) {
+    throw errorValidacion('La fecha debe tener el formato AAAA-MM-DD.');
+  }
+  // Chequeo de fecha real: reconstruir con UTC y comparar que no hubo "roll-over"
+  // (ej. 2026-02-30 → Date la corre a marzo, así que no vuelve a dar la misma cadena).
+  const [a, m, d] = valor.split('-').map(Number);
+  const dt = new Date(Date.UTC(a, m - 1, d));
+  if (dt.getUTCFullYear() !== a || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    throw errorValidacion('La fecha no es una fecha válida del calendario.');
+  }
+  if (valor > hoyISO()) {
+    throw errorValidacion('La fecha no puede ser futura.');
+  }
+  if (minima && valor < minima) {
+    throw errorValidacion('El retorno no puede ser anterior al envío.');
+  }
+  return valor;
+}
+
+// Firmante obligatorio server-side (AUD-015): no vacío tras trim. Devuelve el trim.
+export function validarFirmante(valor) {
+  const f = typeof valor === 'string' ? valor.trim() : '';
+  if (!f) throw errorValidacion('Indicá el firmante responsable.');
+  return f;
+}
 
 // Valida las líneas y devuelve los tipos de prenda involucrados (para reusar pesos/costos).
 // En RETORNO (categorizar=true) valida el desglose por calidad: relavado+costura+descarte <= cantidad.
@@ -143,24 +178,44 @@ export function calcularFaltantes(envio, retorno) {
 
 // --- Creación de remitos (envuelta en transacción) ---
 
-export function crearRemito(payload) {
+// crearRemito acepta una idempotencyKey opcional (AUD-010): si llega y ya hay un remito
+// asociado a esa key, se devuelve ese remito (no se crea otro). Si no, se crea dentro de la
+// misma transacción y se registra la key (el PRIMARY KEY de idempotencia cierra la carrera).
+export function crearRemito(payload, idempotencyKey = null) {
   const tipo = payload.tipo;
   if (tipo !== 'ENVIO' && tipo !== 'RETORNO') {
     throw errorValidacion("El campo 'tipo' debe ser ENVIO o RETORNO.");
   }
-  return enTransaccion(() => (tipo === 'ENVIO' ? crearEnvioCore(payload) : crearRetornoCore(payload)));
+
+  // Fast-path: si la key ya está registrada, devolver el remito existente sin re-crear.
+  if (idempotencyKey) {
+    const previo = idempotenciaRepo.buscar(idempotencyKey);
+    if (previo) return construirDetalle(previo.entidad_id);
+  }
+
+  return enTransaccion(() => {
+    const detalle = tipo === 'ENVIO' ? crearEnvioCore(payload) : crearRetornoCore(payload);
+    if (idempotencyKey) {
+      // detalle.id es el remito devuelto: en ENVIO es el propio envío; en RETORNO es el
+      // ENVÍO conciliado (la vista útil que devuelve crearRetornoCore). Registrar esa entidad
+      // hace que el reintento con la misma key devuelva exactamente el mismo detalle.
+      idempotenciaRepo.registrar(idempotencyKey, `REMITO_${tipo}`, detalle.id);
+    }
+    return detalle;
+  });
 }
 
 function crearEnvioCore(payload) {
   const sector = sectoresRepo.obtener(payload.sector_id);
   if (!sector) throw errorValidacion(`No existe el sector con id ${payload.sector_id}.`);
 
+  const firmante = validarFirmante(payload.firmante); // AUD-015
   const tiposCache = validarItems(payload.items);
   // Validar códigos de prendas identificadas por línea (si vinieran).
   for (const it of payload.items) {
     prendaService.validarCodigosItem(it, tiposCache.get(it.tipo_prenda_id)?.nombre);
   }
-  const fecha = payload.fecha || new Date().toISOString().slice(0, 10);
+  const fecha = validarFecha(payload.fecha); // AUD-007
   const peso = calcularPesoKg(payload.items, tiposCache);
 
   const id = remitosRepo.crear({
@@ -170,7 +225,7 @@ function crearEnvioCore(payload) {
     sector_id: payload.sector_id,
     estado: 'ENVIADO',
     peso_total_kg: peso,
-    firmante: payload.firmante,
+    firmante,
     observaciones: payload.observaciones,
     remito_envio_id: null,
   });
@@ -206,15 +261,31 @@ function crearRetornoCore(payload) {
     throw errorValidacion('El envío ya tiene un retorno registrado.');
   }
 
+  const firmante = validarFirmante(payload.firmante); // AUD-015
   const tiposCache = validarItems(payload.items, { permitirCero: true, categorizar: true });
   // Validar códigos de prendas identificadas por línea (si vinieran).
   for (const it of payload.items) {
     prendaService.validarCodigosItem(it, tiposCache.get(it.tipo_prenda_id)?.nombre);
   }
 
-  // Regla: no se acepta recibir más de lo enviado por tipo, salvo confirmación explícita.
+  // Mapa tipo→cantidad enviada, base de las reglas de conteo (AUD-008).
+  const enviados = new Map(remitosRepo.itemsDe(envio.id).map((e) => [e.tipo_prenda_id, e.cantidad]));
+
+  // AUD-008 (a): nunca se aceptan tipos que NO estaban en el envío, ni siquiera con
+  // confirmar:true. Un tipo no enviado no puede "volver" de la lavandería.
+  for (const it of payload.items) {
+    if (!enviados.has(it.tipo_prenda_id) && it.cantidad > 0) {
+      const nombrePrenda = tiposCache.get(it.tipo_prenda_id)?.nombre || 'esa prenda';
+      throw errorValidacion(
+        `No se puede retornar ${nombrePrenda}: no formaba parte del envío de origen.`
+      );
+    }
+  }
+
+  // Regla: no se acepta recibir MÁS de lo enviado por tipo, salvo confirmación explícita.
+  // Con confirmar:true la diferencia se REGISTRA (para la conciliación) pero, por AUD-008 (b),
+  // el reingreso al stock del sector se acota a lo enviado (ver más abajo).
   if (!payload.confirmar) {
-    const enviados = new Map(remitosRepo.itemsDe(envio.id).map((e) => [e.tipo_prenda_id, e.cantidad]));
     for (const it of payload.items) {
       const enviado = enviados.get(it.tipo_prenda_id) ?? 0;
       if (it.cantidad > enviado) {
@@ -227,7 +298,7 @@ function crearRetornoCore(payload) {
     }
   }
 
-  const fecha = payload.fecha || new Date().toISOString().slice(0, 10);
+  const fecha = validarFecha(payload.fecha, { minima: envio.fecha }); // AUD-007
   const peso = calcularPesoKg(payload.items, tiposCache);
 
   const idRetorno = remitosRepo.crear({
@@ -248,10 +319,21 @@ function crearRetornoCore(payload) {
     const relavado = it.cantidad_relavado || 0;
     const costura = it.cantidad_costura || 0;
     const descarte = it.cantidad_descarte || 0;
-    // Lo que reingresa físicamente al sector = todo lo retornado menos lo que la
-    // lavandería retiene para reprocesar (relavado + costura). Incluye el descarte,
-    // que luego se da de baja (así el descarte tiene su movimiento y no se duplica el conteo).
-    const reingreso = it.cantidad - relavado - costura;
+    // AUD-008 (b): aun con confirmar:true, lo que reingresa al stock del sector se ACOTA a lo
+    // enviado por tipo. La línea del retorno queda registrada tal cual (para la conciliación/
+    // auditoría), pero el excedente por sobre lo enviado NO suma stock.
+    //   ingreso bruto = todo lo retornado que "vuelve" al sector = cantidad - relavado - costura
+    //                   (relavado+costura se quedan en la lavandería para reprocesar).
+    //   Se acota a lo enviado: reingreso = min(cantidad, enviado) - relavado - costura (>= 0).
+    // El reingreso incluye el descarte (que se contra-asienta abajo con -descarte), pero el
+    // descarte que impacta stock también se acota para que el neto del sector nunca supere lo
+    // enviado ni quede negativo por esta línea.
+    const enviadoTipo = enviados.get(it.tipo_prenda_id) ?? 0;
+    const retornableAcotado = Math.min(it.cantidad, enviadoTipo);
+    const reingreso = Math.max(0, retornableAcotado - relavado - costura);
+    // Descarte acotado a lo que efectivamente reingresó (no se puede dar de baja del sector
+    // más de lo que entró por esta línea). Preserva el invariante del kárdex (baja ⇔ egreso).
+    const descarteStock = Math.min(descarte, reingreso);
     if (reingreso > 0) {
       stockRepo.crearMovimiento({
         fecha,
@@ -263,20 +345,25 @@ function crearRetornoCore(payload) {
       });
     }
 
-    // Descarte → baja automática por fin de vida útil + su movimiento de stock (neto sobre el sector: 0).
-    if (descarte > 0) {
+    // Descarte → baja automática por fin de vida útil + su movimiento de stock (neto sobre el
+    // sector: 0). La baja y su egreso de stock usan el descarte ACOTADO (descarteStock): solo se
+    // da de baja del sector lo que efectivamente había en él. Así se preserva el invariante del
+    // kárdex (SUM(bajas FIN_VIDA_UTIL) == -SUM(mov BAJA_FIN_VIDA_UTIL)) que verifica el verificador.
+    // El excedente recibido de más (confirmar:true) queda en la línea del retorno pero no genera
+    // baja de stock, porque nunca ingresó al inventario del sector.
+    if (descarteStock > 0) {
       bajasRepo.crear({
         fecha,
         tipo_prenda_id: it.tipo_prenda_id,
-        cantidad: descarte,
+        cantidad: descarteStock,
         motivo: 'FIN_VIDA_UTIL',
-        autorizado_por: payload.firmante || 'Recepción lavandería',
+        autorizado_por: firmante,
       });
       stockRepo.crearMovimiento({
         fecha,
         sector_id: envio.sector_id,
         tipo_prenda_id: it.tipo_prenda_id,
-        delta: -descarte,
+        delta: -descarteStock,
         motivo: 'BAJA_FIN_VIDA_UTIL',
         remito_id: idRetorno,
       });

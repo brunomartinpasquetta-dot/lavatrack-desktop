@@ -59,6 +59,10 @@ function SectorReposicion({ sector, completado, onDistribuido, presets = [] }) {
   const [firmante, setFirmante] = useState(() => leerFirmante())
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState('')
+  // Idempotency-Key: una por operación de distribución. Se reusa en el reintento
+  // por duplicado (confirmar:true) y si el usuario reintenta tras un error de
+  // red, para no generar dos remitos (AUD-010). Se limpia al confirmarse.
+  const idempotencyKeyRef = useRef('')
 
   // Al recargar los datos tras distribuir, resincronizamos inputs con lo sugerido.
   const primeraRef = useRef(true)
@@ -129,6 +133,10 @@ function SectorReposicion({ sector, completado, onDistribuido, presets = [] }) {
       if (!ok) return
     }
 
+    // Reusamos la key en curso (reintento tras error o confirmación de duplicado);
+    // sólo generamos una nueva cuando no hay ninguna pendiente.
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID()
+
     setGuardando(true)
     try {
       const body = {
@@ -140,7 +148,10 @@ function SectorReposicion({ sector, completado, onDistribuido, presets = [] }) {
         })),
       }
       if (confirmarDuplicado) body.confirmar = true
-      const creado = await post('/reposicion/distribuir', body)
+      const creado = await post('/reposicion/distribuir', body, {
+        'Idempotency-Key': idempotencyKeyRef.current,
+      })
+      idempotencyKeyRef.current = ''
       guardarFirmante(firmante)
       toast.exito(
         creado?.numero

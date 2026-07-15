@@ -61,10 +61,10 @@ export function get(path) {
   return fetch(`/api${path}`, { headers: authHeaders() }).then(handle)
 }
 
-export function post(path, body) {
+export function post(path, body, headers = {}) {
   return fetch(`/api${path}`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: authHeaders({ 'Content-Type': 'application/json', ...headers }),
     body: JSON.stringify(body),
   }).then(handle)
 }

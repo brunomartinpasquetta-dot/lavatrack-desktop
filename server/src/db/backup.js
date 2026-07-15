@@ -69,18 +69,63 @@ function aplicarRetencion(dirBackups, retencion) {
  */
 export async function restaurarBackup(rutaBackupGz) {
   const { gunzip } = await import('node:zlib');
-  const { readFile, writeFile } = await import('node:fs/promises');
+  const { readFile, writeFile, rename } = await import('node:fs/promises');
+  const { DatabaseSync } = await import('node:sqlite');
+  const { errorValidacion } = await import('../services/errores.js');
+
+  // 1) Descomprimir. Si el .gz es inválido, gunzip rechaza acá y NO se tocó la DB viva.
   const comprimido = await readFile(rutaBackupGz);
   const datos = await new Promise((resolve, reject) =>
     gunzip(comprimido, (e, r) => (e ? reject(e) : resolve(r)))
   );
 
-  // Cerrar la conexión (checkpoint) para poder sobrescribir el archivo con seguridad.
+  // 2) Escribir el contenido descomprimido a un archivo TEMPORAL (no a la DB viva todavía)
+  //    y verificar su integridad ANTES de pisar nada (AUD-009).
+  const tmp = `${DB_PATH}.restore-tmp`;
+  if (existsSync(tmp)) rmSync(tmp);
+  await writeFile(tmp, datos);
+
+  try {
+    const verif = new DatabaseSync(tmp);
+    try {
+      const integridad = verif.prepare('PRAGMA integrity_check').get();
+      // PRAGMA integrity_check devuelve una fila { integrity_check: 'ok' } si está sana.
+      const valor = integridad && (integridad.integrity_check ?? Object.values(integridad)[0]);
+      if (valor !== 'ok') {
+        throw errorValidacion('El archivo de respaldo está dañado; no se restauró nada.');
+      }
+      const schema = verif.prepare('PRAGMA schema_version').get();
+      const schemaVer = schema && (schema.schema_version ?? Object.values(schema)[0]);
+      if (!(Number(schemaVer) > 0)) {
+        throw errorValidacion('El archivo de respaldo está dañado; no se restauró nada.');
+      }
+    } finally {
+      try { verif.close(); } catch { /* ya cerrada */ }
+    }
+  } catch (e) {
+    // Falló la apertura o la verificación → borrar el temporal y abortar SIN tocar la DB viva.
+    try { rmSync(tmp); } catch { /* ignorar */ }
+    if (e && e.status === 400) throw e; // ya es un errorValidacion
+    throw errorValidacion('El archivo de respaldo está dañado; no se restauró nada.');
+  }
+
+  // 3) La verificación pasó: recién ahora cerramos la conexión viva (checkpoint) y pisamos.
   cerrarDb();
 
   // Respaldo de la base actual antes de pisarla.
-  if (existsSync(DB_PATH)) copyFileSync(DB_PATH, `${DB_PATH}.pre-restore`);
-  await writeFile(DB_PATH, datos);
+  const prevRestore = `${DB_PATH}.pre-restore`;
+  const habiaDb = existsSync(DB_PATH);
+  if (habiaDb) copyFileSync(DB_PATH, prevRestore);
+
+  try {
+    // Swap atómico: renombrar el temporal ya verificado sobre la DB viva.
+    await rename(tmp, DB_PATH);
+  } catch (e) {
+    // Si el swap falla y habíamos hecho el .pre-restore, restaurar la DB viva original.
+    try { if (habiaDb && existsSync(prevRestore)) copyFileSync(prevRestore, DB_PATH); } catch { /* best-effort */ }
+    try { if (existsSync(tmp)) rmSync(tmp); } catch { /* ignorar */ }
+    throw e;
+  }
 
   // Eliminar los sidecars del WAL: si quedan, una apertura nueva reaplicaría frames
   // viejos sobre la base restaurada y desharía la restauración.

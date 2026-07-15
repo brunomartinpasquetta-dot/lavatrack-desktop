@@ -200,9 +200,23 @@ CREATE TABLE IF NOT EXISTS usuarios (
   fecha_alta TEXT NOT NULL
 );
 
+-- Idempotencia de operaciones POST (AUD-010). El cliente manda un header
+-- Idempotency-Key (UUID) por intento de operación; si la MISMA key se repite
+-- (p. ej. reintento tras corte de red), se devuelve la entidad ya creada en
+-- lugar de crear un duplicado. clave es PRIMARY KEY: el INSERT UNIQUE previene
+-- la carrera. tipo/entidad_id apuntan a qué se creó (ej. 'REMITO' → remitos.id).
+CREATE TABLE IF NOT EXISTS idempotencia (
+  clave TEXT PRIMARY KEY,
+  tipo TEXT NOT NULL,
+  entidad_id INTEGER NOT NULL,
+  fecha TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_dotacion_sector ON dotacion_par(sector_id);
 CREATE INDEX IF NOT EXISTS idx_remitos_tipo_estado ON remitos(tipo, estado);
 CREATE INDEX IF NOT EXISTS idx_remitos_envio ON remitos(remito_envio_id);
+-- Orden de listado paginado de remitos (fecha DESC, id DESC) — AUD-012.
+CREATE INDEX IF NOT EXISTS idx_remitos_fecha ON remitos(fecha DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_items_remito ON remito_items(remito_id);
 -- Índice covering para stockRepo.matriz() (la query más caliente): incluye delta
 -- para que el SUM(delta) por (sector_id, tipo_prenda_id) se resuelva sin lookup a la tabla.

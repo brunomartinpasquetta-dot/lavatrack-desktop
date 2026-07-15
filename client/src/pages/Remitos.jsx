@@ -22,11 +22,17 @@ const ESTADOS = [
 const claseControl =
   'rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500'
 
+const LIMITE = 20
+
 export default function Remitos() {
   const navigate = useNavigate()
   const [filtros, setFiltros] = useState(FILTROS_VACIOS)
   const [sectores, setSectores] = useState([])
   const [remitos, setRemitos] = useState([])
+  const [pagina, setPagina] = useState(1)
+  // total: cantidad total de remitos según el backend paginado (null = desconocido,
+  // p. ej. si el server todavía devolviera un array plano).
+  const [total, setTotal] = useState(null)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState('')
 
@@ -37,19 +43,43 @@ export default function Remitos() {
       .catch(() => setSectores([]))
   }, [])
 
-  // Refetch al cambiar filtros (query params).
+  // Al cambiar los filtros, volvemos a la primera página.
+  useEffect(() => {
+    setPagina(1)
+  }, [filtros])
+
+  // Refetch al cambiar filtros o página (query params + paginación).
   useEffect(() => {
     setCargando(true)
     setError('')
-    get(`/remitos${qs(filtros)}`)
-      .then((r) => setRemitos(r || []))
+    get(`/remitos${qs({ ...filtros, page: pagina, limit: LIMITE })}`)
+      .then((resp) => {
+        // Defensivo: contemplamos tanto la respuesta paginada {items,total,...}
+        // como un array plano (por si el backend aún no paginara).
+        if (Array.isArray(resp)) {
+          setRemitos(resp)
+          setTotal(null)
+        } else {
+          setRemitos(resp?.items || [])
+          setTotal(typeof resp?.total === 'number' ? resp.total : null)
+        }
+      })
       .catch((e) => setError(e.message))
       .finally(() => setCargando(false))
-  }, [filtros])
+  }, [filtros, pagina])
 
   const set = (campo) => (e) => setFiltros((f) => ({ ...f, [campo]: e.target.value }))
   const hayFiltros =
     filtros.estado || filtros.sector_id || filtros.desde || filtros.hasta
+
+  // Índices para el indicador "X-Y de N". offset base-0 según la página actual.
+  const offset = (pagina - 1) * LIMITE
+  const desde = remitos.length ? offset + 1 : 0
+  const hasta = offset + remitos.length
+  // Hay página siguiente si conocemos el total y quedan filas, o si (sin total)
+  // la página vino llena (heurística defensiva ante un array plano).
+  const haySiguiente = total != null ? hasta < total : remitos.length === LIMITE
+  const hayAnterior = pagina > 1
 
   return (
     <div>
@@ -124,7 +154,9 @@ export default function Remitos() {
         ) : (
           <>
             <div className="border-b border-slate-100 px-4 py-3 text-xs font-medium text-slate-500">
-              {remitos.length} remito{remitos.length === 1 ? '' : 's'}
+              {total != null
+                ? `${desde}-${hasta} de ${total} remito${total === 1 ? '' : 's'}`
+                : `${remitos.length} remito${remitos.length === 1 ? '' : 's'}`}
             </div>
             {remitos.length === 0 ? (
               <div className="px-4 py-12 text-center text-sm text-slate-400">
@@ -161,6 +193,29 @@ export default function Remitos() {
                   </tbody>
                 </Tabla>
               </TablaWrap>
+            )}
+
+            {/* Controles de paginación (AUD-012) */}
+            {(hayAnterior || haySiguiente) && (
+              <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
+                <button
+                  onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                  disabled={!hayAnterior}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Anterior
+                </button>
+                <span className="text-xs font-medium text-slate-500">
+                  {total != null ? `Página ${pagina} de ${Math.max(1, Math.ceil(total / LIMITE))}` : `Página ${pagina}`}
+                </span>
+                <button
+                  onClick={() => setPagina((p) => p + 1)}
+                  disabled={!haySiguiente}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Siguiente
+                </button>
+              </div>
             )}
           </>
         )}

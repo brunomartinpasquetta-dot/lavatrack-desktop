@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { get, post } from '../api.js'
 import Card from '../components/Card.jsx'
@@ -35,6 +35,10 @@ export default function RemitoNuevo() {
 
   const [error, setError] = useState('')
   const [enviando, setEnviando] = useState(false)
+  // Idempotency-Key: se genera UNA vez por operación de envío y se reusa si el
+  // usuario reintenta el mismo submit tras un error de red (AUD-010). Así un
+  // corte de red no duplica el remito. Se limpia sólo al confirmarse el envío.
+  const idempotencyKeyRef = useRef('')
 
   useEffect(() => {
     Promise.all([get('/sectores'), get('/tipos-prenda'), get('/presets').catch(() => [])])
@@ -137,13 +141,21 @@ export default function RemitoNuevo() {
       items,
     }
 
+    // Reusamos la key del intento anterior si el usuario reintenta tras un error;
+    // sólo generamos una nueva cuando no hay ninguna en curso.
+    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = crypto.randomUUID()
+
     setEnviando(true)
     try {
-      const creado = await post('/remitos', body)
+      const creado = await post('/remitos', body, {
+        'Idempotency-Key': idempotencyKeyRef.current,
+      })
+      idempotencyKeyRef.current = ''
       guardarFirmante(firmante)
       toast.exito(creado?.numero ? `Envío ${creado.numero} registrado` : 'Envío registrado')
       navigate(`/remitos/${creado.id}`)
     } catch (err) {
+      // Mantenemos la misma key para que el reintento no cree un duplicado.
       setError(err.message)
       toast.error(err.message)
       setEnviando(false)
