@@ -1,5 +1,12 @@
 # Fase 1 — Plan de implementación
 
+> **Estado: COMPLETADA (v1.1.0).** Las 5 olas implementadas, verificadas y en `main`.
+> Ola 1 auth+hardening · Ola 2 firma doble+bajas+reproceso · Ola 3 integridad
+> (AUD-007/008/009/010/012/015) · Ola 4 transportistas + remito imprimible ·
+> Ola 5 QA integral (kárdex 0, las 4 olas conviven). Usuarios demo:
+> admin/admin1234 · super/super1234 · oper/oper1234.
+
+
 Objetivo: llevar LavaTrack de demo a apto-producción para la clínica. Auth + roles + firma doble + remito imprimible con rótulo + transportistas + el lote Fase 1 de la auditoría (AUD-001/003/004/007-010/012/015/016/035).
 
 ## Decisiones de arquitectura (pinneadas)

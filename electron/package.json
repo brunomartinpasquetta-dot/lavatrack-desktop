@@ -1,7 +1,7 @@
 {
   "name": "lavatrack-desktop",
   "productName": "LavaTrack",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "LavaTrack Desktop — shell Electron que empaqueta el servidor y el cliente para uso offline en la clínica.",
   "private": true,
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "lavatrack",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "LavaTrack — Demo de gestión de ropa hospitalaria (clínica ↔ lavandería tercerizada)",
   "private": true,
   "scripts": {
