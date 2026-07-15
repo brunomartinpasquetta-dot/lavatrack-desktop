@@ -35,8 +35,21 @@ CREATE TABLE IF NOT EXISTS tipos_prenda (
   costo_reposicion_ars INTEGER NOT NULL
 );
 
+-- Transportistas: quien traslada la ropa entre la clínica y la lavandería.
+-- documento es libre (CUIT / DNI / patente); contacto es teléfono/observación libre.
+-- activo=1 habilita su uso en remitos nuevos; el soft-delete se hace poniendo activo=0.
+CREATE TABLE IF NOT EXISTS transportistas (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  documento TEXT NOT NULL DEFAULT '',
+  contacto TEXT NOT NULL DEFAULT '',
+  activo INTEGER NOT NULL DEFAULT 1,
+  fecha_alta TEXT NOT NULL
+);
+
 -- Remitos de envío (clínica → lavandería) y retorno (lavandería → clínica).
 -- remito_envio_id vincula un RETORNO con su ENVIO de origen.
+-- transportista_id (nullable): quién trasladó la ropa (Ola 4); alimenta el rótulo imprimible.
 CREATE TABLE IF NOT EXISTS remitos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   numero TEXT NOT NULL UNIQUE,
@@ -47,7 +60,8 @@ CREATE TABLE IF NOT EXISTS remitos (
   peso_total_kg REAL NOT NULL DEFAULT 0,
   firmante TEXT NOT NULL DEFAULT '',
   observaciones TEXT NOT NULL DEFAULT '',
-  remito_envio_id INTEGER REFERENCES remitos(id)
+  remito_envio_id INTEGER REFERENCES remitos(id),
+  transportista_id INTEGER REFERENCES transportistas(id)
 );
 
 -- Líneas de cada remito: cantidad total y cuántas van en bolsa roja (contaminada).

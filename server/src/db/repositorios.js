@@ -98,6 +98,41 @@ export const tiposRepo = {
   },
 };
 
+// ---------- Transportistas (Ola 4) ----------
+export const transportistasRepo = {
+  // listar({activo}): activo === true → solo activos; false → solo inactivos; undefined → todos.
+  listar({ activo } = {}) {
+    const where = [];
+    const params = [];
+    if (activo !== undefined && activo !== null) {
+      where.push('activo = ?');
+      params.push(activo ? 1 : 0);
+    }
+    const sql = `SELECT * FROM transportistas ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY nombre, id`;
+    return getDb().prepare(sql).all(...params);
+  },
+  obtener(id) {
+    return getDb().prepare('SELECT * FROM transportistas WHERE id = ?').get(id) || null;
+  },
+  crear({ nombre, documento, contacto, fecha_alta }) {
+    const info = getDb()
+      .prepare(
+        `INSERT INTO transportistas (nombre, documento, contacto, activo, fecha_alta)
+         VALUES (?, ?, ?, 1, ?)`
+      )
+      .run(nombre, documento || '', contacto || '', fecha_alta);
+    return Number(info.lastInsertRowid);
+  },
+  actualizar(id, { nombre, documento, contacto, activo }) {
+    getDb()
+      .prepare(
+        `UPDATE transportistas SET nombre = ?, documento = ?, contacto = ?, activo = ? WHERE id = ?`
+      )
+      .run(nombre, documento || '', contacto || '', activo ? 1 : 0, id);
+    return this.obtener(id);
+  },
+};
+
 // ---------- Remitos ----------
 export const remitosRepo = {
   // Genera el próximo número secuencial con formato LT-2026-0001.
@@ -138,10 +173,11 @@ export const remitosRepo = {
       pparams.push(filtros.limit, Number.isInteger(filtros.offset) ? filtros.offset : 0);
     }
     const sql = `
-      SELECT r.*, s.nombre AS sector,
+      SELECT r.*, s.nombre AS sector, t.nombre AS transportista,
              (SELECT COALESCE(SUM(cantidad),0) FROM remito_items WHERE remito_id = r.id) AS total_prendas
       FROM remitos r
       JOIN sectores s ON s.id = r.sector_id
+      LEFT JOIN transportistas t ON t.id = r.transportista_id
       ${clausula}
       ORDER BY r.fecha DESC, r.id DESC${paginado}`;
     return getDb().prepare(sql).all(...pparams);
@@ -159,8 +195,11 @@ export const remitosRepo = {
   obtener(id) {
     return getDb()
       .prepare(
-        `SELECT r.*, s.nombre AS sector
-         FROM remitos r JOIN sectores s ON s.id = r.sector_id
+        `SELECT r.*, s.nombre AS sector,
+                t.nombre AS transportista, t.documento AS transportista_documento
+         FROM remitos r
+         JOIN sectores s ON s.id = r.sector_id
+         LEFT JOIN transportistas t ON t.id = r.transportista_id
          WHERE r.id = ?`
       )
       .get(id) || null;
@@ -188,21 +227,23 @@ export const remitosRepo = {
   ultimos(limite = 5) {
     return getDb()
       .prepare(
-        `SELECT r.*, s.nombre AS sector,
+        `SELECT r.*, s.nombre AS sector, t.nombre AS transportista,
                 (SELECT COALESCE(SUM(cantidad),0) FROM remito_items WHERE remito_id = r.id) AS total_prendas
-         FROM remitos r JOIN sectores s ON s.id = r.sector_id
+         FROM remitos r
+         JOIN sectores s ON s.id = r.sector_id
+         LEFT JOIN transportistas t ON t.id = r.transportista_id
          ORDER BY r.fecha DESC, r.id DESC LIMIT ?`
       )
       .all(limite);
   },
 
-  crear({ numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id }) {
+  crear({ numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id, transportista_id }) {
     const info = getDb()
       .prepare(
-        `INSERT INTO remitos (numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO remitos (numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id, transportista_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante || '', observaciones || '', remito_envio_id ?? null);
+      .run(numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante || '', observaciones || '', remito_envio_id ?? null, transportista_id ?? null);
     return Number(info.lastInsertRowid);
   },
 

@@ -6,7 +6,7 @@ import { getDb, baseVacia } from './connection.js';
 import {
   sectoresRepo, tiposRepo, stockRepo, bajasRepo, dotacionRepo,
   ciclosRepo, inventariosRepo, ajustesRepo, presetsRepo, prendasRepo,
-  usuariosRepo,
+  usuariosRepo, transportistasRepo,
 } from './repositorios.js';
 import { crearRemito } from '../services/remitosService.js';
 import { enTransaccion } from './tx.js';
@@ -46,6 +46,29 @@ export function sembrarUsuariosDemo() {
   });
   console.log(`[seed] Usuarios demo sembrados: ${USUARIOS_DEMO.map((u) => u.usuario).join(', ')}.`);
   return USUARIOS_DEMO.length;
+}
+
+// Transportistas demo (Ola 4). Idempotente por su propio guard (solo si no hay ninguno),
+// independiente del guard baseVacia: una base preexistente también los recibe. Devuelve
+// los ids (existentes o recién creados) para poder asignarlos a envíos en el seed.
+const TRANSPORTISTAS_DEMO = [
+  { nombre: 'Logística Santa Rita', documento: 'CUIT 30-71234567-8', contacto: '011-4555-1200' },
+  { nombre: 'Transportes El Álamo',  documento: 'CUIT 30-70987654-3', contacto: '011-4777-8890' },
+  { nombre: 'Roberto Suárez (interno)', documento: 'DNI 25.789.456',   contacto: 'Interno 342' },
+];
+
+export function sembrarTransportistasDemo() {
+  const existentes = transportistasRepo.listar();
+  if (existentes.length > 0) return existentes.map((t) => t.id);
+  const fechaAlta = new Date().toISOString();
+  const ids = [];
+  enTransaccion(() => {
+    for (const t of TRANSPORTISTAS_DEMO) {
+      ids.push(transportistasRepo.crear({ ...t, fecha_alta: fechaAlta }));
+    }
+  });
+  console.log(`[seed] Transportistas demo sembrados: ${TRANSPORTISTAS_DEMO.map((t) => t.nombre).join(', ')}.`);
+  return ids;
 }
 
 // PRNG determinístico (LCG) para que la demo genere siempre los mismos datos.
@@ -113,6 +136,9 @@ export function correrSeed() {
   sembrarUsuariosDemo();
 
   if (!baseVacia()) {
+    // Base preexistente: sembramos transportistas demo si aún no hay ninguno (Ola 4),
+    // así una base cargada antes de esta ola también los recibe. Idempotente (guard propio).
+    sembrarTransportistasDemo();
     console.log('[seed] La base ya tiene datos; no se vuelve a sembrar.');
     return;
   }
@@ -120,6 +146,11 @@ export function correrSeed() {
   // Toda la carga va en una sola transacción (enTransaccion es re-entrante, así que los
   // crearRemito internos se unen a esta misma sin abrir transacciones anidadas).
   enTransaccion(() => {
+    // 0) Transportistas demo (Ola 4). Se siembran acá para tener sus ids y asignarlos
+    //    a algunos envíos más abajo. sembrarTransportistasDemo es re-entrante (usa
+    //    enTransaccion) y se une a esta misma transacción.
+    const transportistaIds = sembrarTransportistasDemo();
+
     // 1) Tipos de prenda
     const tipos = TIPOS.map((t) => tiposRepo.crear(t));
 
@@ -200,6 +231,12 @@ export function correrSeed() {
         return { tipo_prenda_id: tipoId, cantidad, cantidad_contaminada: contaminada };
       });
 
+      // Asignar transportista a ~2 de cada 3 envíos, rotando entre los del seed (coherente
+      // y determinístico). Algunos envíos quedan sin transportista a propósito (campo opcional).
+      const transportista_id = (i % 3 !== 2 && transportistaIds.length)
+        ? transportistaIds[i % transportistaIds.length]
+        : null;
+
       const envio = crearRemito({
         tipo: 'ENVIO',
         sector_id: sector.id,
@@ -207,6 +244,7 @@ export function correrSeed() {
         firmante: elegir(FIRMANTES),
         observaciones: '',
         items,
+        transportista_id,
       });
 
       // Pendientes: no se registra retorno (quedan ENVIADO / en lavandería).
@@ -260,6 +298,7 @@ export function correrSeed() {
         observaciones: '',
         items: itemsRetorno,
         confirmar: true,
+        transportista_id, // mismo transportista del envío (coherencia)
       });
     }
 

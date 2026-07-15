@@ -23,10 +23,12 @@ export default function RemitoNuevo() {
   const [sectores, setSectores] = useState([])
   const [tipos, setTipos] = useState([])
   const [presets, setPresets] = useState([])
+  const [transportistas, setTransportistas] = useState([])
   const [presetSel, setPresetSel] = useState('')
   const [cargando, setCargando] = useState(true)
 
   const [sectorId, setSectorId] = useState('')
+  const [transportistaId, setTransportistaId] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
   // Precargamos el último firmante usado (AUD-005). Sigue siendo editable.
   const [firmante, setFirmante] = useState(() => leerFirmante())
@@ -41,11 +43,17 @@ export default function RemitoNuevo() {
   const idempotencyKeyRef = useRef('')
 
   useEffect(() => {
-    Promise.all([get('/sectores'), get('/tipos-prenda'), get('/presets').catch(() => [])])
-      .then(([sec, tp, pr]) => {
+    Promise.all([
+      get('/sectores'),
+      get('/tipos-prenda'),
+      get('/presets').catch(() => []),
+      get('/transportistas?activo=1').catch(() => []),
+    ])
+      .then(([sec, tp, pr, tr]) => {
         setSectores(sec || [])
         setTipos(tp || [])
         setPresets(Array.isArray(pr) ? pr : [])
+        setTransportistas(Array.isArray(tr) ? tr : [])
       })
       .catch((e) => setError(e.message))
       .finally(() => setCargando(false))
@@ -140,6 +148,8 @@ export default function RemitoNuevo() {
       remito_envio_id: null,
       items,
     }
+    // Transportista es opcional: sólo se manda si el operario eligió uno.
+    if (transportistaId) body.transportista_id = Number(transportistaId)
 
     // Reusamos la key del intento anterior si el usuario reintenta tras un error;
     // sólo generamos una nueva cuando no hay ninguna en curso.
@@ -219,6 +229,24 @@ export default function RemitoNuevo() {
                 placeholder="Nombre y apellido"
                 className={claseInput}
               />
+            </div>
+            <div className="sm:col-span-3">
+              <label className="mb-1 block text-xs font-medium text-slate-500">
+                Transportista (opcional)
+              </label>
+              <select
+                value={transportistaId}
+                onChange={(e) => setTransportistaId(e.target.value)}
+                className={claseInput}
+              >
+                <option value="">Sin transportista</option>
+                {transportistas.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.nombre}
+                    {t.documento ? ` — ${t.documento}` : ''}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </Card>

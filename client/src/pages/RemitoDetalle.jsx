@@ -182,12 +182,20 @@ export default function RemitoDetalle() {
         descripcion={esEnvio ? 'Remito de envío' : 'Remito de retorno'}
         breadcrumb={['Operación', 'Envíos a lavandería', remito.numero]}
         accion={
-          <button
-            onClick={() => navigate('/remitos')}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
-          >
-            ← Volver
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => window.print()}
+              className="min-h-[44px] rounded-lg border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-medium text-teal-700 hover:bg-teal-100"
+            >
+              Imprimir remito
+            </button>
+            <button
+              onClick={() => navigate('/remitos')}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+            >
+              ← Volver
+            </button>
+          </div>
         }
       />
 
@@ -521,6 +529,112 @@ export default function RemitoDetalle() {
           )}
         </Card>
       )}
+
+      {/* Rótulo imprimible. Oculto en pantalla (.rotulo { display:none }); sólo
+          aparece al imprimir, cuando @media print oculta el resto del chrome. */}
+      <RotuloRemito remito={remito} esEnvio={esEnvio} />
+    </div>
+  )
+}
+
+// Rótulo negro sobre blanco (~A4) para acompañar el traslado físico de la ropa.
+// Usa estilos inline para garantizar el contraste al imprimir (independiente de Tailwind).
+function RotuloRemito({ remito, esEnvio }) {
+  const items = remito.items || []
+  const totalPrendas = items.reduce((s, it) => s + (Number(it.cantidad) || 0), 0)
+  const totalContaminadas = items.reduce(
+    (s, it) => s + (Number(it.cantidad_contaminada) || 0),
+    0,
+  )
+  const transportista = remito.transportista
+
+  const borde = '1px solid #000'
+  const celda = { border: borde, padding: '4px 8px', textAlign: 'left' }
+  const celdaNum = { border: borde, padding: '4px 8px', textAlign: 'right' }
+
+  return (
+    <div className="rotulo" style={{ color: '#000' }}>
+      <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+        <div style={{ fontSize: '18px', fontWeight: 700 }}>
+          LavaTrack — Remito de {esEnvio ? 'ENVÍO' : 'RETORNO'}
+        </div>
+        <div style={{ fontSize: '13px', marginTop: '2px' }}>
+          N.º {remito.numero} · Fecha {formatFecha(remito.fecha)}
+        </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: '16px',
+          margin: '10px 0',
+        }}
+      >
+        <div>
+          <div style={{ fontWeight: 700 }}>Origen</div>
+          <div>{esEnvio ? remito.sector : 'Lavandería'}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontWeight: 700 }}>Destino</div>
+          <div>{esEnvio ? 'Lavandería' : remito.sector}</div>
+        </div>
+      </div>
+
+      <div style={{ margin: '10px 0' }}>
+        <div style={{ fontWeight: 700 }}>Transportista</div>
+        <div>
+          {transportista
+            ? `${transportista.nombre}${transportista.documento ? ` — ${transportista.documento}` : ''}`
+            : '—'}
+        </div>
+      </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '10px 0' }}>
+        <thead>
+          <tr>
+            <th style={celda}>Tipo de prenda</th>
+            <th style={celdaNum}>Cantidad</th>
+            <th style={celdaNum}>Contaminadas (bolsa roja)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it) => (
+            <tr key={it.id ?? it.tipo_prenda_id}>
+              <td style={celda}>{it.tipo_prenda}</td>
+              <td style={celdaNum}>{formatNum(it.cantidad)}</td>
+              <td style={celdaNum}>{formatNum(it.cantidad_contaminada ?? 0)}</td>
+            </tr>
+          ))}
+          <tr>
+            <td style={{ ...celda, fontWeight: 700 }}>Total</td>
+            <td style={{ ...celdaNum, fontWeight: 700 }}>{formatNum(totalPrendas)}</td>
+            <td style={{ ...celdaNum, fontWeight: 700 }}>{formatNum(totalContaminadas)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style={{ margin: '10px 0', fontWeight: 700 }}>
+        Peso total: {remito.peso_total_kg != null ? formatKg(remito.peso_total_kg) : '—'}
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: '16px',
+          marginTop: '40px',
+        }}
+      >
+        {['Remitente', 'Transportista', 'Receptor'].map((rol) => (
+          <div key={rol} style={{ flex: 1, textAlign: 'center' }}>
+            <div style={{ borderTop: borde, paddingTop: '4px', marginTop: '24px' }}>
+              {rol}
+            </div>
+            <div style={{ fontSize: '10px', marginTop: '2px' }}>Aclaración / fecha</div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

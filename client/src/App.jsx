@@ -15,6 +15,7 @@ import Reposicion from './pages/Reposicion.jsx'
 import Reportes from './pages/Reportes.jsx'
 import Sectores from './pages/Sectores.jsx'
 import TiposPrenda from './pages/TiposPrenda.jsx'
+import Transportistas from './pages/Transportistas.jsx'
 import Ajustes from './pages/Ajustes.jsx'
 import Inventario from './pages/Inventario.jsx'
 import Bajas from './pages/Bajas.jsx'
@@ -70,6 +71,7 @@ export default function App() {
                 <Route path="/sectores" element={<Sectores />} />
                 <Route path="/tipos-prenda" element={<TiposPrenda />} />
                 <Route path="/presets" element={<Presets />} />
+                <Route path="/transportistas" element={<Transportistas />} />
                 {/* Sistema */}
                 <Route path="/usuarios" element={<Usuarios />} />
                 <Route path="/ajustes" element={<Ajustes />} />

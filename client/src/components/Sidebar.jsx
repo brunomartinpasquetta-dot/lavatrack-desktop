@@ -68,7 +68,7 @@ const grupos = [
       { to: '/sectores', label: 'Sectores', icono: iconos.sectores },
       { to: '/tipos-prenda', label: 'Tipos de prenda', icono: iconos.prendas },
       { to: '/presets', label: 'Presets de carga', icono: iconos.presets },
-      { label: 'Transportistas', icono: iconos.transportistas, disabled: 'Fase 1' },
+      { to: '/transportistas', label: 'Transportistas', icono: iconos.transportistas },
     ],
   },
   {

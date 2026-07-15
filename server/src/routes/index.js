@@ -13,6 +13,7 @@ import * as bajas from '../controllers/bajaController.js';
 import * as reproceso from '../controllers/reprocesoController.js';
 import * as presets from '../controllers/presetController.js';
 import * as prendas from '../controllers/prendaController.js';
+import { transportistas } from '../controllers/transportistaController.js';
 import * as auth from '../controllers/authController.js';
 import { usuarios } from '../controllers/usuarioController.js';
 import { autenticar, requireRol } from '../middleware/auth.js';
@@ -121,6 +122,11 @@ router.get('/presets', presets.listar);
 router.post('/presets', presets.crear);
 router.put('/presets/:id', presets.actualizar);
 router.delete('/presets/:id', presets.eliminar);
+
+// Transportistas (Ola 4): listar (autenticado), alta OPERARIO+, edición SUPERVISOR+.
+router.get('/transportistas', transportistas.listar);
+router.post('/transportistas', requireRol('OPERARIO'), transportistas.crear);
+router.put('/transportistas/:id', requireRol('SUPERVISOR'), transportistas.actualizar);
 
 // Prendas identificadas (barcode-ready)
 router.get('/prendas-identificadas', prendas.listar);

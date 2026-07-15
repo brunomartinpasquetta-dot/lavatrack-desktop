@@ -223,6 +223,17 @@ export function correrMigraciones(db) {
   // (M6) y usuarios (M7). NO se duplica el CREATE acá; no hay cambios in-place sobre
   // tablas EXISTENTES para este lote.
 
+  // --- M10: transportistas + remitos.transportista_id (Ola 4) ---
+  // La tabla transportistas la crea el esquema base (SCHEMA_SQL, IF NOT EXISTS), igual
+  // que dotacion_par (M3), el refactor de dominio (M6) y usuarios (M7). Acá solo va el
+  // ALTER in-place sobre remitos (tabla EXISTENTE en bases viejas). El REFERENCES se
+  // omite en el ADD COLUMN (SQLite no admite FK inline al agregar columna a tabla con
+  // datos); la FK va en el CREATE fresco de SCHEMA_SQL, y la validación de existencia/
+  // estado activo la hace la capa de servicio.
+  if (agregarColumnaSiFalta(db, 'remitos', 'transportista_id', 'INTEGER REFERENCES transportistas(id)')) {
+    cambios.push('remitos.transportista_id');
+  }
+
   if (cambios.length) {
     console.log('[migrations] Aplicadas:', cambios.join(', '));
   }

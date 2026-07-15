@@ -1,7 +1,7 @@
 // Lógica de negocio de remitos: creación de envíos/retornos, validaciones y conciliación.
 // Toda escritura multi-tabla va dentro de enTransaccion() (BEGIN IMMEDIATE): así el
 // correlativo y los movimientos de stock son atómicos frente a varias terminales.
-import { remitosRepo, sectoresRepo, tiposRepo, stockRepo, bajasRepo, idempotenciaRepo } from '../db/repositorios.js';
+import { remitosRepo, sectoresRepo, tiposRepo, stockRepo, bajasRepo, idempotenciaRepo, transportistasRepo } from '../db/repositorios.js';
 import { enTransaccion } from '../db/tx.js';
 import { errorValidacion, errorNoEncontrado } from './errores.js';
 import * as cicloService from './cicloService.js';
@@ -41,6 +41,20 @@ export function validarFecha(valor, { minima = null } = {}) {
     throw errorValidacion('El retorno no puede ser anterior al envío.');
   }
   return valor;
+}
+
+// Transportista opcional (Ola 4): si viene, debe existir y estar activo. Devuelve el id
+// (number) validado o null si no se indicó. Acepta null/undefined/'' como "sin transportista".
+export function validarTransportista(valor) {
+  if (valor === undefined || valor === null || valor === '') return null;
+  const id = Number(valor);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw errorValidacion('El transportista indicado no es válido.');
+  }
+  const t = transportistasRepo.obtener(id);
+  if (!t) throw errorValidacion(`No existe el transportista con id ${id}.`);
+  if (!t.activo) throw errorValidacion('El transportista indicado no está activo.');
+  return id;
 }
 
 // Firmante obligatorio server-side (AUD-015): no vacío tras trim. Devuelve el trim.
@@ -112,6 +126,13 @@ export function construirDetalle(id) {
 
   const items = remitosRepo.itemsDe(id).map(conCodigos);
   const detalle = { ...remito, items };
+
+  // Transportista anidado (Ola 4): objeto {id,nombre,documento} para el rótulo imprimible,
+  // o null si el remito no tiene transportista asignado. Los campos planos del JOIN
+  // (transportista, transportista_documento) se dejan igual por compatibilidad.
+  detalle.transportista = remito.transportista_id
+    ? { id: remito.transportista_id, nombre: remito.transportista, documento: remito.transportista_documento || '' }
+    : null;
 
   if (remito.tipo === 'ENVIO') {
     const retorno = remitosRepo.retornoDe(id);
@@ -210,6 +231,7 @@ function crearEnvioCore(payload) {
   if (!sector) throw errorValidacion(`No existe el sector con id ${payload.sector_id}.`);
 
   const firmante = validarFirmante(payload.firmante); // AUD-015
+  const transportista_id = validarTransportista(payload.transportista_id); // Ola 4
   const tiposCache = validarItems(payload.items);
   // Validar códigos de prendas identificadas por línea (si vinieran).
   for (const it of payload.items) {
@@ -228,6 +250,7 @@ function crearEnvioCore(payload) {
     firmante,
     observaciones: payload.observaciones,
     remito_envio_id: null,
+    transportista_id,
   });
 
   for (const it of payload.items) {
@@ -262,6 +285,7 @@ function crearRetornoCore(payload) {
   }
 
   const firmante = validarFirmante(payload.firmante); // AUD-015
+  const transportista_id = validarTransportista(payload.transportista_id); // Ola 4
   const tiposCache = validarItems(payload.items, { permitirCero: true, categorizar: true });
   // Validar códigos de prendas identificadas por línea (si vinieran).
   for (const it of payload.items) {
@@ -311,6 +335,7 @@ function crearRetornoCore(payload) {
     firmante: payload.firmante,
     observaciones: payload.observaciones,
     remito_envio_id: envio.id,
+    transportista_id,
   });
 
   for (const it of payload.items) {
