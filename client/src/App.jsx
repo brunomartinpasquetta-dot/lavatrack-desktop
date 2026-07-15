@@ -17,6 +17,8 @@ import Sectores from './pages/Sectores.jsx'
 import TiposPrenda from './pages/TiposPrenda.jsx'
 import Ajustes from './pages/Ajustes.jsx'
 import Inventario from './pages/Inventario.jsx'
+import Bajas from './pages/Bajas.jsx'
+import Reproceso from './pages/Reproceso.jsx'
 import Presets from './pages/Presets.jsx'
 import PrendasIdentificadas from './pages/PrendasIdentificadas.jsx'
 import Usuarios from './pages/Usuarios.jsx'
@@ -56,9 +58,11 @@ export default function App() {
                 <Route path="/remitos/nuevo" element={<RemitoNuevo />} />
                 <Route path="/remitos/:id" element={<RemitoDetalle />} />
                 <Route path="/retornos" element={<Retornos />} />
+                <Route path="/reproceso" element={<Reproceso />} />
                 {/* Control */}
                 <Route path="/stock" element={<Stock />} />
                 <Route path="/mermas" element={<Mermas />} />
+                <Route path="/bajas" element={<Bajas />} />
                 <Route path="/inventario" element={<Inventario />} />
                 <Route path="/prendas-identificadas" element={<PrendasIdentificadas />} />
                 <Route path="/reportes" element={<Reportes />} />

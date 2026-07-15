@@ -33,7 +33,7 @@ function reconstruirMovimientosStock(db) {
         sector_id INTEGER NOT NULL REFERENCES sectores(id),
         tipo_prenda_id INTEGER NOT NULL REFERENCES tipos_prenda(id),
         delta INTEGER NOT NULL,
-        motivo TEXT NOT NULL CHECK (motivo IN ('ENVIO','RETORNO','BAJA_ROTURA','BAJA_PERDIDA','BAJA_FIN_VIDA_UTIL','ALTA_REPOSICION','AJUSTE')),
+        motivo TEXT NOT NULL CHECK (motivo IN ('ENVIO','RETORNO','BAJA_ROTURA','BAJA_PERDIDA','BAJA_FIN_VIDA_UTIL','ALTA_REPOSICION','AJUSTE','REINGRESO_REPROCESO')),
         remito_id INTEGER REFERENCES remitos(id)
       );
     `);
@@ -167,6 +167,30 @@ export function correrMigraciones(db) {
   if (movSqlAjuste && !movSqlAjuste.sql.includes('AJUSTE')) {
     reconstruirMovimientosStock(db);
     cambios.push('movimientos_stock (CHECK ampliado con AJUSTE)');
+  }
+
+  // --- M8: firma doble + bajas manuales + reingreso de reproceso (Ola 2) ---
+  // 8a) Columnas nuevas (ALTER idempotente). El CHECK del motivo de bajas/ajustes va
+  //     solo en el esquema fresco; la validación de valores la hace la capa de servicio.
+  if (agregarColumnaSiFalta(db, 'bajas', 'sector_id', 'INTEGER REFERENCES sectores(id)')) {
+    cambios.push('bajas.sector_id');
+  }
+  if (agregarColumnaSiFalta(db, 'bajas', 'cofirmante', 'TEXT')) {
+    cambios.push('bajas.cofirmante');
+  }
+  if (agregarColumnaSiFalta(db, 'ajustes', 'cofirmante', 'TEXT')) {
+    cambios.push('ajustes.cofirmante');
+  }
+
+  // 8b) Ampliar el CHECK de movimientos_stock.motivo para admitir 'REINGRESO_REPROCESO'.
+  //     Idempotente: solo reconstruye si el CHECK actual (en sqlite_master.sql) todavía no
+  //     lo admite. Reusa reconstruirMovimientosStock() (ya genera el CHECK completo).
+  const movSqlReproceso = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='movimientos_stock'")
+    .get();
+  if (movSqlReproceso && !movSqlReproceso.sql.includes('REINGRESO_REPROCESO')) {
+    reconstruirMovimientosStock(db);
+    cambios.push('movimientos_stock (CHECK ampliado con REINGRESO_REPROCESO)');
   }
 
   // --- M7: usuarios (auth Fase 1) ---

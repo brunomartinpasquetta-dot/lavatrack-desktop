@@ -9,6 +9,8 @@ import * as reposicion from '../controllers/reposicionController.js';
 import * as ciclos from '../controllers/cicloController.js';
 import * as inventarios from '../controllers/inventarioController.js';
 import * as ajustes from '../controllers/ajusteController.js';
+import * as bajas from '../controllers/bajaController.js';
+import * as reproceso from '../controllers/reprocesoController.js';
 import * as presets from '../controllers/presetController.js';
 import * as prendas from '../controllers/prendaController.js';
 import * as auth from '../controllers/authController.js';
@@ -104,6 +106,15 @@ router.post('/inventarios/:id/cerrar', inventarios.cerrar);
 // Ajustes manuales de stock
 router.get('/ajustes', ajustes.listar);
 router.post('/ajustes', ajustes.crear);
+
+// Bajas manuales (ROTURA / PÉRDIDA con firma doble). Cualquier autenticado puede
+// originarlas; la co-firma la valida el service (debe ser SUPERVISOR o superior).
+router.get('/bajas', bajas.listar);
+router.post('/bajas', bajas.crear);
+
+// Reproceso: pendientes de reingreso + reingreso al stock del sector (AUD-003).
+router.get('/reproceso', reproceso.pendientes);
+router.post('/reproceso/reingreso', reproceso.reingresar);
 
 // Presets de carga
 router.get('/presets', presets.listar);

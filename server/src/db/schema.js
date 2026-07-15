@@ -76,18 +76,22 @@ CREATE TABLE IF NOT EXISTS movimientos_stock (
   sector_id INTEGER NOT NULL REFERENCES sectores(id),
   tipo_prenda_id INTEGER NOT NULL REFERENCES tipos_prenda(id),
   delta INTEGER NOT NULL,
-  motivo TEXT NOT NULL CHECK (motivo IN ('ENVIO','RETORNO','BAJA_ROTURA','BAJA_PERDIDA','BAJA_FIN_VIDA_UTIL','ALTA_REPOSICION','AJUSTE')),
+  motivo TEXT NOT NULL CHECK (motivo IN ('ENVIO','RETORNO','BAJA_ROTURA','BAJA_PERDIDA','BAJA_FIN_VIDA_UTIL','ALTA_REPOSICION','AJUSTE','REINGRESO_REPROCESO')),
   remito_id INTEGER REFERENCES remitos(id)
 );
 
 -- Registro de bajas de prendas (rotura, pérdida, fin de vida útil).
+-- sector_id (nullable): sector del que se descuenta la baja manual (Ola 2, AUD-004).
+-- cofirmante (nullable): usuario/nombre del supervisor que co-firma las bajas manuales.
 CREATE TABLE IF NOT EXISTS bajas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   fecha TEXT NOT NULL,
+  sector_id INTEGER REFERENCES sectores(id),
   tipo_prenda_id INTEGER NOT NULL REFERENCES tipos_prenda(id),
   cantidad INTEGER NOT NULL,
   motivo TEXT NOT NULL CHECK (motivo IN ('ROTURA','PERDIDA','FIN_VIDA_UTIL')),
-  autorizado_por TEXT NOT NULL DEFAULT ''
+  autorizado_por TEXT NOT NULL DEFAULT '',
+  cofirmante TEXT
 );
 
 -- Remitos de distribución interna: reposición de Ropería Central hacia un sector.
@@ -146,7 +150,9 @@ CREATE TABLE IF NOT EXISTS ajustes (
   delta INTEGER NOT NULL,
   motivo TEXT NOT NULL CHECK (motivo IN ('INVENTARIO','CORRECCION','ROBO_PERDIDA')),
   autorizado_por TEXT NOT NULL DEFAULT '',
-  inventario_id INTEGER REFERENCES inventarios(id)
+  inventario_id INTEGER REFERENCES inventarios(id),
+  -- cofirmante (nullable): supervisor co-firmante exigido en ajustes motivo ROBO_PERDIDA (Ola 2).
+  cofirmante TEXT
 );
 
 -- Presets de carga reutilizables (plantillas de líneas para remitos/carros).

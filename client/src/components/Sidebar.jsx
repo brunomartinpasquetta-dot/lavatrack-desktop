@@ -15,6 +15,8 @@ const iconos = {
   reposicion: sv(<><path d="M21 12a9 9 0 1 1-3-6.7" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 4v4h-4" strokeLinecap="round" strokeLinejoin="round" /></>),
   envios: sv(<><path d="M3 7l9-4 9 4-9 4-9-4Z" strokeLinejoin="round" /><path d="M3 7v10l9 4 9-4V7" strokeLinejoin="round" /><path d="M12 11v10" /></>),
   retornos: sv(<><path d="M9 14 4 9l5-5" strokeLinecap="round" strokeLinejoin="round" /><path d="M4 9h11a5 5 0 0 1 5 5v1" strokeLinecap="round" strokeLinejoin="round" /></>),
+  reproceso: sv(<><path d="M21 2v6h-6" strokeLinecap="round" strokeLinejoin="round" /><path d="M3 12a9 9 0 0 1 15-6.7L21 8" strokeLinecap="round" strokeLinejoin="round" /><path d="M3 22v-6h6" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" strokeLinecap="round" strokeLinejoin="round" /></>),
+  bajas: sv(<><path d="M3 6h18" strokeLinecap="round" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" strokeLinecap="round" strokeLinejoin="round" /><path d="M6 6l1 14a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-14" strokeLinejoin="round" /><path d="M10 11v5M14 11v5" strokeLinecap="round" /></>),
   stock: sv(<><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>),
   mermas: sv(<><path d="M3 3v18h18" strokeLinecap="round" /><path d="M7 14l3-4 3 3 4-6" strokeLinecap="round" strokeLinejoin="round" /></>),
   reportes: sv(<><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 8h8M8 12h8M8 16h5" strokeLinecap="round" /></>),
@@ -46,6 +48,7 @@ const grupos = [
       { to: '/reposicion', label: 'Reposición del día', icono: iconos.reposicion },
       { to: '/remitos', label: 'Envíos a lavandería', icono: iconos.envios, end: true },
       { to: '/retornos', label: 'Retornos y conciliación', icono: iconos.retornos, badge: 'pendientes' },
+      { to: '/reproceso', label: 'Reproceso', icono: iconos.reproceso },
     ],
   },
   {
@@ -53,6 +56,7 @@ const grupos = [
     items: [
       { to: '/stock', label: 'Stock por sector', icono: iconos.stock },
       { to: '/mermas', label: 'Mermas y calidad', icono: iconos.mermas },
+      { to: '/bajas', label: 'Bajas de prendas', icono: iconos.bajas },
       { to: '/inventario', label: 'Inventario cíclico', icono: iconos.inventario },
       { to: '/prendas-identificadas', label: 'Prendas identificadas', icono: iconos.identificadas },
       { to: '/reportes', label: 'Reportes', icono: iconos.reportes },

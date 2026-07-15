@@ -239,8 +239,10 @@ export const stockRepo = {
 
   // Prendas actualmente en lavandería:
   //  (a) las enviadas (ENVIO en estado ENVIADO) aún sin retornar, más
-  //  (b) las categorizadas como relavado/costura en retornos, que siguen en la
-  //      lavandería a la espera de un retorno posterior.
+  //  (b) las categorizadas como relavado/costura en retornos que siguen en la
+  //      lavandería, MENOS las que ya se reingresaron al stock del sector como
+  //      reproceso terminado (movimientos motivo REINGRESO_REPROCESO, Ola 2 AUD-003).
+  // Nunca negativo (se clampa a 0 por si la data quedara inconsistente).
   prendasEnLavanderia() {
     const enviadas = getDb()
       .prepare(
@@ -250,7 +252,7 @@ export const stockRepo = {
          WHERE r.tipo = 'ENVIO' AND r.estado = 'ENVIADO'`
       )
       .get().n;
-    const reprocesando = getDb()
+    const reproceso = getDb()
       .prepare(
         `SELECT COALESCE(SUM(ri.cantidad_relavado + ri.cantidad_costura),0) AS n
          FROM remito_items ri
@@ -258,7 +260,13 @@ export const stockRepo = {
          WHERE r.tipo = 'RETORNO'`
       )
       .get().n;
-    return enviadas + reprocesando;
+    const reingresado = getDb()
+      .prepare(
+        `SELECT COALESCE(SUM(delta),0) AS n
+         FROM movimientos_stock WHERE motivo = 'REINGRESO_REPROCESO'`
+      )
+      .get().n;
+    return Math.max(0, enviadas + (reproceso - reingresado));
   },
 
   // Kg enviados en los últimos 30 días (ventana móvil, más representativa para la demo).
@@ -276,25 +284,88 @@ export const stockRepo = {
 
 // ---------- Bajas ----------
 export const bajasRepo = {
-  crear({ fecha, tipo_prenda_id, cantidad, motivo, autorizado_por }) {
+  // sector_id y cofirmante son opcionales: las bajas automáticas (descarte / fin de
+  // vida útil) no tienen sector puntual ni co-firma; las manuales (Ola 2) sí.
+  crear({ fecha, sector_id, tipo_prenda_id, cantidad, motivo, autorizado_por, cofirmante }) {
     const info = getDb()
       .prepare(
-        `INSERT INTO bajas (fecha, tipo_prenda_id, cantidad, motivo, autorizado_por)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO bajas (fecha, sector_id, tipo_prenda_id, cantidad, motivo, autorizado_por, cofirmante)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(fecha, tipo_prenda_id, cantidad, motivo, autorizado_por || '');
+      .run(fecha, sector_id ?? null, tipo_prenda_id, cantidad, motivo, autorizado_por || '', cofirmante ?? null);
     return Number(info.lastInsertRowid);
   },
 
   listar(desde, hasta) {
     return getDb()
       .prepare(
-        `SELECT b.*, tp.nombre AS tipo_prenda, tp.costo_reposicion_ars
-         FROM bajas b JOIN tipos_prenda tp ON tp.id = b.tipo_prenda_id
+        `SELECT b.*, tp.nombre AS tipo_prenda, tp.costo_reposicion_ars,
+                (b.cantidad * tp.costo_reposicion_ars) AS costo_ars,
+                s.nombre AS sector
+         FROM bajas b
+         JOIN tipos_prenda tp ON tp.id = b.tipo_prenda_id
+         LEFT JOIN sectores s ON s.id = b.sector_id
          WHERE b.fecha >= ? AND b.fecha <= ?
          ORDER BY b.fecha DESC, b.id DESC`
       )
       .all(desde, hasta);
+  },
+};
+
+// ---------- Reproceso (relavado/costura pendiente de reingreso) ----------
+// El reproceso de un (sector, tipo) es lo categorizado como relavado + costura en los
+// retornos de ese sector/tipo (prendas que quedaron en la lavandería para reprocesar).
+// A medida que la lavandería las devuelve reparadas, se reingresan al stock del sector
+// con movimientos motivo 'REINGRESO_REPROCESO' (delta positivo). Lo PENDIENTE es la
+// diferencia: reproceso total − reingresado. relavado/costura NUNCA sumaron al stock del
+// sector, así que el reingreso no genera doble conteo.
+export const reprocesoRepo = {
+  // Filas con pendiente > 0 por (sector_id, tipo_prenda_id), con nombres (JOINs).
+  reprocesoPendiente() {
+    return getDb()
+      .prepare(
+        `SELECT rp.sector_id, s.nombre AS sector,
+                rp.tipo_prenda_id, tp.nombre AS tipo_prenda,
+                rp.reproceso - COALESCE(mr.reingresado, 0) AS pendiente
+         FROM (
+           SELECT r.sector_id, ri.tipo_prenda_id,
+                  SUM(ri.cantidad_relavado + ri.cantidad_costura) AS reproceso
+           FROM remito_items ri
+           JOIN remitos r ON r.id = ri.remito_id
+           WHERE r.tipo = 'RETORNO'
+           GROUP BY r.sector_id, ri.tipo_prenda_id
+         ) rp
+         JOIN sectores s ON s.id = rp.sector_id
+         JOIN tipos_prenda tp ON tp.id = rp.tipo_prenda_id
+         LEFT JOIN (
+           SELECT sector_id, tipo_prenda_id, SUM(delta) AS reingresado
+           FROM movimientos_stock
+           WHERE motivo = 'REINGRESO_REPROCESO'
+           GROUP BY sector_id, tipo_prenda_id
+         ) mr ON mr.sector_id = rp.sector_id AND mr.tipo_prenda_id = rp.tipo_prenda_id
+         WHERE rp.reproceso - COALESCE(mr.reingresado, 0) > 0
+         ORDER BY pendiente DESC, rp.sector_id, rp.tipo_prenda_id`
+      )
+      .all();
+  },
+
+  // Cantidad pendiente de reingreso para un (sector, tipo) puntual → número (guard del reingreso).
+  pendienteDe(sectorId, tipoId) {
+    const row = getDb()
+      .prepare(
+        `SELECT
+           (SELECT COALESCE(SUM(ri.cantidad_relavado + ri.cantidad_costura), 0)
+              FROM remito_items ri
+              JOIN remitos r ON r.id = ri.remito_id
+             WHERE r.tipo = 'RETORNO' AND r.sector_id = ? AND ri.tipo_prenda_id = ?)
+           -
+           (SELECT COALESCE(SUM(delta), 0)
+              FROM movimientos_stock
+             WHERE motivo = 'REINGRESO_REPROCESO' AND sector_id = ? AND tipo_prenda_id = ?)
+           AS pendiente`
+      )
+      .get(sectorId, tipoId, sectorId, tipoId);
+    return row.pendiente;
   },
 };
 
@@ -461,13 +532,14 @@ export const inventariosRepo = {
 
 // ---------- Ajustes de stock ----------
 export const ajustesRepo = {
-  crear({ fecha, sector_id, tipo_prenda_id, delta, motivo, autorizado_por, inventario_id }) {
+  // cofirmante (nullable): se exige y se guarda solo en ajustes motivo ROBO_PERDIDA (Ola 2).
+  crear({ fecha, sector_id, tipo_prenda_id, delta, motivo, autorizado_por, inventario_id, cofirmante }) {
     const info = getDb()
       .prepare(
-        `INSERT INTO ajustes (fecha, sector_id, tipo_prenda_id, delta, motivo, autorizado_por, inventario_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO ajustes (fecha, sector_id, tipo_prenda_id, delta, motivo, autorizado_por, inventario_id, cofirmante)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(fecha, sector_id, tipo_prenda_id, delta, motivo, autorizado_por || '', inventario_id ?? null);
+      .run(fecha, sector_id, tipo_prenda_id, delta, motivo, autorizado_por || '', inventario_id ?? null, cofirmante ?? null);
     return Number(info.lastInsertRowid);
   },
   listar(desde, hasta) {

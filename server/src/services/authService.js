@@ -9,6 +9,32 @@ function usuarioPublico(fila) {
   return { id: fila.id, usuario: fila.usuario, nombre: fila.nombre, rol: fila.rol };
 }
 
+// Roles habilitados para co-firmar (SUPERVISOR o superior).
+const ROLES_COFIRMA = ['SUPERVISOR', 'ADMIN'];
+
+// Valida una co-firma (firma doble): un 2º usuario, DISTINTO del actor, activo,
+// con rol >= SUPERVISOR y contraseña correcta. Devuelve el usuario público del
+// co-firmante o lanza un error de dominio con mensaje claro (sin filtrar si el
+// usuario existe o no: las credenciales siempre dan un mensaje genérico).
+export function cofirmar({ usuario, password, actorId } = {}) {
+  if (!usuario || typeof usuario !== 'string' || !password || typeof password !== 'string') {
+    throw errorValidacion('La co-firma requiere usuario y contraseña de un supervisor.');
+  }
+  const fila = usuariosRepo.obtenerPorUsuario(usuario.trim());
+  const credencialesMal = () => errorAuth('Credenciales de co-firma inválidas.');
+  // Usuario inexistente o inactivo o clave incorrecta → mensaje genérico (no filtramos existencia).
+  if (!fila || !fila.activo) throw credencialesMal();
+  if (!verifyPassword(password, fila.password_hash, fila.password_salt)) throw credencialesMal();
+  // Debe ser un supervisor DISTINTO del operario que originó la acción.
+  if (actorId != null && fila.id === actorId) {
+    throw errorValidacion('La co-firma debe ser de un supervisor distinto al operario.');
+  }
+  if (!ROLES_COFIRMA.includes(fila.rol)) {
+    throw errorValidacion('La co-firma debe ser de un supervisor distinto al operario.');
+  }
+  return usuarioPublico(fila);
+}
+
 export const authService = {
   // Valida usuario activo + contraseña. OK → { token, usuario }. Mal → 401 genérico.
   login({ usuario, password } = {}) {

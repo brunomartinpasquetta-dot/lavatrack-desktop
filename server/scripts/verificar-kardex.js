@@ -125,6 +125,65 @@ if (ciclosMalos.length) {
   ok.push('ciclos_prenda: sin nulls, promedios >= 0.');
 }
 
+// --- Chequeo 5: reingreso de reproceso <= reproceso total, por (sector,tipo) (Ola 2, AUD-003) ---
+// Lo mandado a relavado/costura por sector/tipo acota cuánto se puede reingresar.
+const reprocesoTotal = new Map(
+  db
+    .prepare(
+      `SELECT r.sector_id, ri.tipo_prenda_id,
+              SUM(ri.cantidad_relavado + ri.cantidad_costura) AS total
+       FROM remito_items ri JOIN remitos r ON r.id = ri.remito_id
+       WHERE r.tipo = 'RETORNO'
+       GROUP BY r.sector_id, ri.tipo_prenda_id`
+    )
+    .all()
+    .map((r) => [`${r.sector_id}:${r.tipo_prenda_id}`, r.total])
+);
+const reingresado = db
+  .prepare(
+    `SELECT sector_id, tipo_prenda_id, SUM(delta) AS d
+     FROM movimientos_stock WHERE motivo = 'REINGRESO_REPROCESO'
+     GROUP BY sector_id, tipo_prenda_id`
+  )
+  .all();
+let reprocesoOk = true;
+for (const r of reingresado) {
+  const total = reprocesoTotal.get(`${r.sector_id}:${r.tipo_prenda_id}`) ?? 0;
+  if (r.d > total) {
+    reprocesoOk = false;
+    problemas.push(
+      `Reingreso de reproceso (${r.sector_id}:${r.tipo_prenda_id}) ${r.d} > reproceso mandado ${total}.`
+    );
+  }
+}
+if (reprocesoOk) ok.push('Reingreso de reproceso ≤ reproceso mandado, por (sector,tipo).');
+
+// --- Chequeo 6: prendas en lavandería >= 0 (reproceso pendiente global no negativo) ---
+const totRepro = db
+  .prepare(
+    `SELECT COALESCE(SUM(cantidad_relavado + cantidad_costura),0) AS n
+     FROM remito_items ri JOIN remitos r ON r.id = ri.remito_id WHERE r.tipo = 'RETORNO'`
+  )
+  .get().n;
+const totReingreso = db
+  .prepare(
+    `SELECT COALESCE(SUM(delta),0) AS n FROM movimientos_stock WHERE motivo = 'REINGRESO_REPROCESO'`
+  )
+  .get().n;
+const enviadasSinRetornar = db
+  .prepare(
+    `SELECT COALESCE(SUM(ri.cantidad),0) AS n
+     FROM remito_items ri JOIN remitos r ON r.id = ri.remito_id
+     WHERE r.tipo = 'ENVIO' AND r.estado = 'ENVIADO'`
+  )
+  .get().n;
+const enLavanderia = enviadasSinRetornar + (totRepro - totReingreso);
+if (enLavanderia < 0) {
+  problemas.push(`Prendas en lavandería NEGATIVO: ${enLavanderia}.`);
+} else {
+  ok.push(`Prendas en lavandería >= 0 (${enLavanderia}).`);
+}
+
 db.close();
 
 // --- Reporte ---
