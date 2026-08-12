@@ -10,7 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const CONFIG_PATH =
   process.env.LAVATRACK_CONFIG_PATH || join(__dirname, '..', 'data', 'config.json');
 
-const DEFAULTS = { puerto: 3051 };
+const DEFAULTS = { puerto: 3051, modo_simple: false };
 
 // Lee la config (con defaults si el archivo no existe o está corrupto).
 export function leerConfig() {

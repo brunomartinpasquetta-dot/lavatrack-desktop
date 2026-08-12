@@ -1,7 +1,7 @@
 // Lógica de negocio de remitos: creación de envíos/retornos, validaciones y conciliación.
 // Toda escritura multi-tabla va dentro de enTransaccion() (BEGIN IMMEDIATE): así el
 // correlativo y los movimientos de stock son atómicos frente a varias terminales.
-import { remitosRepo, sectoresRepo, tiposRepo, stockRepo, bajasRepo, idempotenciaRepo, transportistasRepo } from '../db/repositorios.js';
+import { remitosRepo, sectoresRepo, tiposRepo, stockRepo, bajasRepo, idempotenciaRepo, transportistasRepo, lavaderosRepo } from '../db/repositorios.js';
 import { enTransaccion } from '../db/tx.js';
 import { errorValidacion, errorNoEncontrado } from './errores.js';
 import * as cicloService from './cicloService.js';
@@ -54,6 +54,20 @@ export function validarTransportista(valor) {
   const t = transportistasRepo.obtener(id);
   if (!t) throw errorValidacion(`No existe el transportista con id ${id}.`);
   if (!t.activo) throw errorValidacion('El transportista indicado no está activo.');
+  return id;
+}
+
+// Lavadero opcional (San Jerónimo): si viene, debe existir y estar activo. Devuelve el id
+// (number) validado o null si no se indicó. Acepta null/undefined/'' como "sin lavadero".
+export function validarLavadero(valor) {
+  if (valor === undefined || valor === null || valor === '') return null;
+  const id = Number(valor);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw errorValidacion('El lavadero indicado no es válido.');
+  }
+  const l = lavaderosRepo.obtener(id);
+  if (!l) throw errorValidacion(`No existe el lavadero con id ${id}.`);
+  if (!l.activo) throw errorValidacion('El lavadero indicado no está activo.');
   return id;
 }
 
@@ -132,6 +146,13 @@ export function construirDetalle(id) {
   // (transportista, transportista_documento) se dejan igual por compatibilidad.
   detalle.transportista = remito.transportista_id
     ? { id: remito.transportista_id, nombre: remito.transportista, documento: remito.transportista_documento || '' }
+    : null;
+
+  // Lavadero anidado (San Jerónimo): objeto {id,nombre} para la cabecera y el rótulo
+  // imprimible, o null si el remito no tiene lavadero asignado. El campo plano del JOIN
+  // (lavadero) se deja igual por compatibilidad.
+  detalle.lavadero = remito.lavadero_id
+    ? { id: remito.lavadero_id, nombre: remito.lavadero }
     : null;
 
   if (remito.tipo === 'ENVIO') {
@@ -232,6 +253,7 @@ function crearEnvioCore(payload) {
 
   const firmante = validarFirmante(payload.firmante); // AUD-015
   const transportista_id = validarTransportista(payload.transportista_id); // Ola 4
+  const lavadero_id = validarLavadero(payload.lavadero_id); // San Jerónimo
   const tiposCache = validarItems(payload.items);
   // Validar códigos de prendas identificadas por línea (si vinieran).
   for (const it of payload.items) {
@@ -251,6 +273,7 @@ function crearEnvioCore(payload) {
     observaciones: payload.observaciones,
     remito_envio_id: null,
     transportista_id,
+    lavadero_id,
   });
 
   for (const it of payload.items) {
@@ -286,6 +309,10 @@ function crearRetornoCore(payload) {
 
   const firmante = validarFirmante(payload.firmante); // AUD-015
   const transportista_id = validarTransportista(payload.transportista_id); // Ola 4
+  // Lavadero opcional (San Jerónimo): si no viene, se hereda el del envío de origen.
+  const lavadero_id = payload.lavadero_id !== undefined
+    ? validarLavadero(payload.lavadero_id)
+    : (envio.lavadero_id ?? null);
   const tiposCache = validarItems(payload.items, { permitirCero: true, categorizar: true });
   // Validar códigos de prendas identificadas por línea (si vinieran).
   for (const it of payload.items) {
@@ -336,6 +363,7 @@ function crearRetornoCore(payload) {
     observaciones: payload.observaciones,
     remito_envio_id: envio.id,
     transportista_id,
+    lavadero_id,
   });
 
   for (const it of payload.items) {

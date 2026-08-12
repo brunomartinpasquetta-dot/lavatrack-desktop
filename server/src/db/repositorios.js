@@ -133,6 +133,36 @@ export const transportistasRepo = {
   },
 };
 
+// ---------- Lavaderos (San Jerónimo) ----------
+export const lavaderosRepo = {
+  // listar({activo}): activo === true → solo activos; false → solo inactivos; undefined → todos.
+  listar({ activo } = {}) {
+    const where = [];
+    const params = [];
+    if (activo !== undefined && activo !== null) {
+      where.push('activo = ?');
+      params.push(activo ? 1 : 0);
+    }
+    const sql = `SELECT * FROM lavaderos ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY nombre, id`;
+    return getDb().prepare(sql).all(...params);
+  },
+  obtener(id) {
+    return getDb().prepare('SELECT * FROM lavaderos WHERE id = ?').get(id) || null;
+  },
+  crear({ nombre, fecha_alta }) {
+    const info = getDb()
+      .prepare('INSERT INTO lavaderos (nombre, activo, fecha_alta) VALUES (?, 1, ?)')
+      .run(nombre, fecha_alta);
+    return Number(info.lastInsertRowid);
+  },
+  actualizar(id, { nombre, activo }) {
+    getDb()
+      .prepare('UPDATE lavaderos SET nombre = ?, activo = ? WHERE id = ?')
+      .run(nombre, activo ? 1 : 0, id);
+    return this.obtener(id);
+  },
+};
+
 // ---------- Remitos ----------
 export const remitosRepo = {
   // Genera el próximo número secuencial con formato LT-2026-0001.
@@ -173,11 +203,12 @@ export const remitosRepo = {
       pparams.push(filtros.limit, Number.isInteger(filtros.offset) ? filtros.offset : 0);
     }
     const sql = `
-      SELECT r.*, s.nombre AS sector, t.nombre AS transportista,
+      SELECT r.*, s.nombre AS sector, t.nombre AS transportista, l.nombre AS lavadero,
              (SELECT COALESCE(SUM(cantidad),0) FROM remito_items WHERE remito_id = r.id) AS total_prendas
       FROM remitos r
       JOIN sectores s ON s.id = r.sector_id
       LEFT JOIN transportistas t ON t.id = r.transportista_id
+      LEFT JOIN lavaderos l ON l.id = r.lavadero_id
       ${clausula}
       ORDER BY r.fecha DESC, r.id DESC${paginado}`;
     return getDb().prepare(sql).all(...pparams);
@@ -196,10 +227,12 @@ export const remitosRepo = {
     return getDb()
       .prepare(
         `SELECT r.*, s.nombre AS sector,
-                t.nombre AS transportista, t.documento AS transportista_documento
+                t.nombre AS transportista, t.documento AS transportista_documento,
+                l.nombre AS lavadero
          FROM remitos r
          JOIN sectores s ON s.id = r.sector_id
          LEFT JOIN transportistas t ON t.id = r.transportista_id
+         LEFT JOIN lavaderos l ON l.id = r.lavadero_id
          WHERE r.id = ?`
       )
       .get(id) || null;
@@ -227,23 +260,24 @@ export const remitosRepo = {
   ultimos(limite = 5) {
     return getDb()
       .prepare(
-        `SELECT r.*, s.nombre AS sector, t.nombre AS transportista,
+        `SELECT r.*, s.nombre AS sector, t.nombre AS transportista, l.nombre AS lavadero,
                 (SELECT COALESCE(SUM(cantidad),0) FROM remito_items WHERE remito_id = r.id) AS total_prendas
          FROM remitos r
          JOIN sectores s ON s.id = r.sector_id
          LEFT JOIN transportistas t ON t.id = r.transportista_id
+         LEFT JOIN lavaderos l ON l.id = r.lavadero_id
          ORDER BY r.fecha DESC, r.id DESC LIMIT ?`
       )
       .all(limite);
   },
 
-  crear({ numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id, transportista_id }) {
+  crear({ numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id, transportista_id, lavadero_id }) {
     const info = getDb()
       .prepare(
-        `INSERT INTO remitos (numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id, transportista_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO remitos (numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante, observaciones, remito_envio_id, transportista_id, lavadero_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante || '', observaciones || '', remito_envio_id ?? null, transportista_id ?? null);
+      .run(numero, tipo, fecha, sector_id, estado, peso_total_kg, firmante || '', observaciones || '', remito_envio_id ?? null, transportista_id ?? null, lavadero_id ?? null);
     return Number(info.lastInsertRowid);
   },
 

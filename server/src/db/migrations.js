@@ -234,6 +234,16 @@ export function correrMigraciones(db) {
     cambios.push('remitos.transportista_id');
   }
 
+  // --- M11: lavaderos + remitos.lavadero_id (San Jerónimo) ---
+  // La tabla lavaderos la crea el esquema base (SCHEMA_SQL, IF NOT EXISTS), igual que
+  // transportistas (M10) y usuarios (M7). Acá solo va el ALTER in-place sobre remitos
+  // (tabla EXISTENTE en bases viejas). El REFERENCES se omite en el ADD COLUMN (SQLite
+  // no admite FK inline al agregar columna a tabla con datos); la FK va en el CREATE
+  // fresco de SCHEMA_SQL, y la validación de existencia/estado activo la hace el service.
+  if (agregarColumnaSiFalta(db, 'remitos', 'lavadero_id', 'INTEGER REFERENCES lavaderos(id)')) {
+    cambios.push('remitos.lavadero_id');
+  }
+
   if (cambios.length) {
     console.log('[migrations] Aplicadas:', cambios.join(', '));
   }

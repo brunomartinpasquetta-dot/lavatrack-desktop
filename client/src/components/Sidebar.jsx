@@ -85,15 +85,44 @@ const claseLink = ({ isActive }) =>
     isActive ? 'bg-teal-50 text-teal-700' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
   }`
 
+// MODO SIMPLE (demo San Jerónimo): cuando GET /api/config trae modo_simple=true,
+// mostramos SOLO estos ítems (por label). Se aplica ADEMÁS del gating por rol.
+const ITEMS_MODO_SIMPLE = new Set([
+  'Panel general',
+  'Reposición del día',
+  'Envíos a lavandería',
+  'Retornos y conciliación',
+  'Stock por sector',
+  'Mermas y calidad',
+])
+
 export default function Sidebar() {
   const { usuario, logout, rolAlMenos } = useAuth()
   const [pendientes, setPendientes] = useState(0)
+  // Si el backend aún no expone modo_simple (o /config falla), queda false → sidebar completo.
+  const [modoSimple, setModoSimple] = useState(false)
 
-  // Gating por rol (UX): ocultamos ítems y grupos que el rol no puede usar.
-  // La seguridad real la valida el servidor; esto sólo evita fricción.
+  // Gating por rol (UX) + filtro de modo simple. La seguridad real la valida el
+  // servidor; esto sólo evita fricción y adapta el menú al demo simple.
   const gruposVisibles = grupos
-    .map((g) => ({ ...g, items: g.items.filter((it) => !it.rol || rolAlMenos(it.rol)) }))
+    .map((g) => ({
+      ...g,
+      items: g.items.filter(
+        (it) =>
+          (!it.rol || rolAlMenos(it.rol)) &&
+          (!modoSimple || ITEMS_MODO_SIMPLE.has(it.label)),
+      ),
+    }))
     .filter((g) => g.items.length > 0)
+
+  // Config de modo simple (una vez al montar). Con .catch para no romper si /config no está.
+  useEffect(() => {
+    let vivo = true
+    get('/config')
+      .then((cfg) => vivo && setModoSimple(cfg?.modo_simple === true))
+      .catch(() => {})
+    return () => { vivo = false }
+  }, [])
 
   // Contador de envíos ENVIADO sin retorno (badge en "Retornos").
   useEffect(() => {

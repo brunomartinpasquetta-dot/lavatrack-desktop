@@ -214,6 +214,7 @@ export default function RemitoDetalle() {
           <Dato label="Peso total">
             {remito.peso_total_kg != null ? formatKg(remito.peso_total_kg) : '—'}
           </Dato>
+          {remito.lavadero && <Dato label="Lavadero">{remito.lavadero.nombre}</Dato>}
         </div>
         {remito.observaciones && (
           <div className="mt-4 border-t border-slate-100 pt-4">
@@ -580,6 +581,13 @@ function RotuloRemito({ remito, esEnvio }) {
           <div>{esEnvio ? 'Lavandería' : remito.sector}</div>
         </div>
       </div>
+
+      {remito.lavadero && (
+        <div style={{ margin: '6px 0' }}>
+          <span style={{ fontWeight: 700 }}>Lavadero: </span>
+          {remito.lavadero.nombre}
+        </div>
+      )}
 
       <div style={{ margin: '10px 0' }}>
         <div style={{ fontWeight: 700 }}>Transportista</div>

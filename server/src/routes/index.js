@@ -14,6 +14,7 @@ import * as reproceso from '../controllers/reprocesoController.js';
 import * as presets from '../controllers/presetController.js';
 import * as prendas from '../controllers/prendaController.js';
 import { transportistas } from '../controllers/transportistaController.js';
+import { lavaderos } from '../controllers/lavaderoController.js';
 import * as auth from '../controllers/authController.js';
 import { usuarios } from '../controllers/usuarioController.js';
 import { autenticar, requireRol } from '../middleware/auth.js';
@@ -49,15 +50,32 @@ router.use(autenticar);
 // Usuario actual (según el token).
 router.get('/auth/me', auth.me);
 
-// Configuración de la instalación (puerto). Solo ADMIN. Cambiar el puerto requiere reiniciar.
-router.get('/config', requireRol('ADMIN'), (req, res) => res.json(leerConfig()));
+// Configuración de la instalación. Devuelve SOLO campos seguros (nunca jwt_secret).
+// GET: cualquier usuario autenticado (el sidebar necesita modo_simple). PUT: solo ADMIN.
+const configPublica = () => {
+  const c = leerConfig();
+  return { puerto: c.puerto, modo_simple: !!c.modo_simple };
+};
+router.get('/config', (req, res) => res.json(configPublica()));
 router.put('/config', requireRol('ADMIN'), (req, res) => {
-  const puerto = Number(req.body?.puerto);
-  if (!Number.isInteger(puerto) || puerto < 1024 || puerto > 65535) {
-    throw errorValidacion('El puerto debe ser un entero entre 1024 y 65535.');
+  const cambios = {};
+  // Puerto: se valida SOLO si viene en el body (cambiarlo exige reiniciar el server).
+  if (req.body?.puerto !== undefined) {
+    const puerto = Number(req.body.puerto);
+    if (!Number.isInteger(puerto) || puerto < 1024 || puerto > 65535) {
+      throw errorValidacion('El puerto debe ser un entero entre 1024 y 65535.');
+    }
+    cambios.puerto = puerto;
   }
-  const config = escribirConfig({ puerto });
-  res.json({ config, reiniciar: true });
+  // Modo simple (San Jerónimo): boolean opcional; se coacciona de forma robusta.
+  if (req.body?.modo_simple !== undefined) {
+    const v = req.body.modo_simple;
+    cambios.modo_simple = v === true || v === 1 || v === '1' || v === 'true';
+  }
+  escribirConfig(cambios);
+  // Solo hace falta reiniciar si se cambió el puerto. Nunca devolvemos el config
+  // completo (contiene jwt_secret): solo los campos seguros.
+  res.json({ config: configPublica(), reiniciar: cambios.puerto !== undefined });
 });
 
 // Administración de usuarios (solo ADMIN).
@@ -127,6 +145,11 @@ router.delete('/presets/:id', presets.eliminar);
 router.get('/transportistas', transportistas.listar);
 router.post('/transportistas', requireRol('OPERARIO'), transportistas.crear);
 router.put('/transportistas/:id', requireRol('SUPERVISOR'), transportistas.actualizar);
+
+// Lavaderos (San Jerónimo): listar (autenticado), alta OPERARIO+, edición SUPERVISOR+.
+router.get('/lavaderos', lavaderos.listar);
+router.post('/lavaderos', requireRol('OPERARIO'), lavaderos.crear);
+router.put('/lavaderos/:id', requireRol('SUPERVISOR'), lavaderos.actualizar);
 
 // Prendas identificadas (barcode-ready)
 router.get('/prendas-identificadas', prendas.listar);

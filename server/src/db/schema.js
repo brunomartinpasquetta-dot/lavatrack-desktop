@@ -47,9 +47,21 @@ CREATE TABLE IF NOT EXISTS transportistas (
   fecha_alta TEXT NOT NULL
 );
 
+-- Lavaderos: la(s) lavandería(s) tercerizada(s) a las que se manda la ropa.
+-- Muchos clientes trabajan con más de una (ej. una para casi todo y otra para
+-- ropa especial). activo=1 habilita su uso en remitos nuevos; el soft-delete se
+-- hace poniendo activo=0 (preserva la referencia histórica desde remitos.lavadero_id).
+CREATE TABLE IF NOT EXISTS lavaderos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  activo INTEGER NOT NULL DEFAULT 1,
+  fecha_alta TEXT NOT NULL
+);
+
 -- Remitos de envío (clínica → lavandería) y retorno (lavandería → clínica).
 -- remito_envio_id vincula un RETORNO con su ENVIO de origen.
 -- transportista_id (nullable): quién trasladó la ropa (Ola 4); alimenta el rótulo imprimible.
+-- lavadero_id (nullable): a qué lavandería tercerizada se mandó la ropa (San Jerónimo).
 CREATE TABLE IF NOT EXISTS remitos (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   numero TEXT NOT NULL UNIQUE,
@@ -61,7 +73,8 @@ CREATE TABLE IF NOT EXISTS remitos (
   firmante TEXT NOT NULL DEFAULT '',
   observaciones TEXT NOT NULL DEFAULT '',
   remito_envio_id INTEGER REFERENCES remitos(id),
-  transportista_id INTEGER REFERENCES transportistas(id)
+  transportista_id INTEGER REFERENCES transportistas(id),
+  lavadero_id INTEGER REFERENCES lavaderos(id)
 );
 
 -- Líneas de cada remito: cantidad total y cuántas van en bolsa roja (contaminada).

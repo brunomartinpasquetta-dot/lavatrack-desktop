@@ -24,11 +24,13 @@ export default function RemitoNuevo() {
   const [tipos, setTipos] = useState([])
   const [presets, setPresets] = useState([])
   const [transportistas, setTransportistas] = useState([])
+  const [lavaderos, setLavaderos] = useState([])
   const [presetSel, setPresetSel] = useState('')
   const [cargando, setCargando] = useState(true)
 
   const [sectorId, setSectorId] = useState('')
   const [transportistaId, setTransportistaId] = useState('')
+  const [lavaderoId, setLavaderoId] = useState('')
   const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
   // Precargamos el último firmante usado (AUD-005). Sigue siendo editable.
   const [firmante, setFirmante] = useState(() => leerFirmante())
@@ -48,12 +50,15 @@ export default function RemitoNuevo() {
       get('/tipos-prenda'),
       get('/presets').catch(() => []),
       get('/transportistas?activo=1').catch(() => []),
+      // Lavaderos: opcional; si el endpoint no está aún, no rompemos el formulario.
+      get('/lavaderos?activo=1').catch(() => []),
     ])
-      .then(([sec, tp, pr, tr]) => {
+      .then(([sec, tp, pr, tr, lv]) => {
         setSectores(sec || [])
         setTipos(tp || [])
         setPresets(Array.isArray(pr) ? pr : [])
         setTransportistas(Array.isArray(tr) ? tr : [])
+        setLavaderos(Array.isArray(lv) ? lv : [])
       })
       .catch((e) => setError(e.message))
       .finally(() => setCargando(false))
@@ -150,6 +155,8 @@ export default function RemitoNuevo() {
     }
     // Transportista es opcional: sólo se manda si el operario eligió uno.
     if (transportistaId) body.transportista_id = Number(transportistaId)
+    // Lavadero es opcional: sólo se manda si se eligió uno.
+    if (lavaderoId) body.lavadero_id = Number(lavaderoId)
 
     // Reusamos la key del intento anterior si el usuario reintenta tras un error;
     // sólo generamos una nueva cuando no hay ninguna en curso.
@@ -230,7 +237,22 @@ export default function RemitoNuevo() {
                 className={claseInput}
               />
             </div>
-            <div className="sm:col-span-3">
+            <div className="sm:col-span-1">
+              <label className="mb-1 block text-xs font-medium text-slate-500">Lavadero</label>
+              <select
+                value={lavaderoId}
+                onChange={(e) => setLavaderoId(e.target.value)}
+                className={claseInput}
+              >
+                <option value="">Seleccionar lavadero…</option>
+                {lavaderos.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-medium text-slate-500">
                 Transportista (opcional)
               </label>
